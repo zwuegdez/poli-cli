@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-export const DEFAULT_REMOTE_BASE_URL = 'https://api.poliai.qzz.io/v1';
+// Default Router Endpoint as requested
+export const DEFAULT_ROUTER_BASE_URL = 'https://router.poliai.qzz.io/v1';
+export const DEFAULT_REMOTE_BASE_URL = DEFAULT_ROUTER_BASE_URL;
+export const DEFAULT_ACCOUNT_API_BASE = 'https://router.poliai.qzz.io';
 export const DEFAULT_LOCAL_BASE_URL = 'http://127.0.0.1:8000/v1';
-export const DEFAULT_ACCOUNT_API_BASE = 'https://api.poliai.qzz.io';
 export const DEFAULT_MODEL = 'gpt-6.1-sol';
 
 export function getPoliHomeDir() {
@@ -27,30 +29,18 @@ export function getHistoryPath() {
 }
 
 export async function detectDefaultBaseUrl() {
-  // If POLIAI_BASE_URL is set, use it
+  // If explicitly overridden via env var, use it
   if (process.env.POLIAI_BASE_URL) return process.env.POLIAI_BASE_URL.replace(/\/+$/, '');
   if (process.env.POLI_BASE_URL) return process.env.POLI_BASE_URL.replace(/\/+$/, '');
 
-  // Check if local poli-proxy is responsive on port 8000
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 350);
-    const res = await fetch('http://127.0.0.1:8000/health', { signal: controller.signal });
-    clearTimeout(timeout);
-    if (res.ok) {
-      return DEFAULT_LOCAL_BASE_URL;
-    }
-  } catch {
-    // fallback
-  }
-
-  return DEFAULT_REMOTE_BASE_URL;
+  // Default to router endpoint
+  return DEFAULT_ROUTER_BASE_URL;
 }
 
 export function loadConfig() {
   const configPath = getConfigPath();
   const defaults = {
-    baseUrl: DEFAULT_LOCAL_BASE_URL,
+    baseUrl: DEFAULT_ROUTER_BASE_URL,
     accountApiBase: DEFAULT_ACCOUNT_API_BASE,
     model: DEFAULT_MODEL,
     autoApprove: false,

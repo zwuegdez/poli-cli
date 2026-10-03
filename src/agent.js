@@ -26,7 +26,7 @@ export class PoliAgent {
       let streamedAssistantText = '';
       let isFirstChunk = true;
 
-      // Call LLM
+      // Call LLM via Router
       spinner.start(`Thinking (${this.config.model})...`);
 
       let response;
@@ -43,6 +43,7 @@ export class PoliAgent {
               if (isFirstChunk) {
                 spinner.stop();
                 isFirstChunk = false;
+                process.stdout.write(`\n${colors.dim}╭─ ${colors.bold}${colors.brightCyan}✦ poli-code${colors.reset} ${colors.dim}(${this.config.model}) ${'─'.repeat(Math.max(2, 50))}╮${colors.reset}\n`);
               }
               process.stdout.write(chunk.text);
               streamedAssistantText += chunk.text;
@@ -50,13 +51,14 @@ export class PoliAgent {
           }
         });
       } catch (err) {
-        spinner.fail(`LLM Request failed: ${err.message}`);
+        spinner.fail(`Router request failed: ${err.message}`);
         return { error: err.message };
       }
 
       spinner.stop();
-      if (streamedAssistantText && !streamedAssistantText.endsWith('\n')) {
-        process.stdout.write('\n');
+      if (streamedAssistantText) {
+        if (!streamedAssistantText.endsWith('\n')) process.stdout.write('\n');
+        process.stdout.write(`${colors.dim}╰${'─'.repeat(Math.max(2, 70))}╯${colors.reset}\n\n`);
       }
 
       const { message, usage } = response;

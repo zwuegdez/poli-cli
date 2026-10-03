@@ -2,7 +2,7 @@
 import { loadConfig, saveConfig } from '../config.js';
 import { loadCredentials } from '../auth.js';
 import { PoliClient } from '../client.js';
-import { colors, style } from '../ui/theme.js';
+import { colors, style, box } from '../ui/theme.js';
 import { Spinner } from '../ui/spinner.js';
 
 export async function cmdModels(selectModel = null) {
@@ -15,42 +15,52 @@ export async function cmdModels(selectModel = null) {
   }
 
   const client = new PoliClient({ baseUrl: config.baseUrl, apiKey: creds.apiKey });
-  const spinner = new Spinner('Fetching models from proxy...').start();
+  const spinner = new Spinner('Fetching available models from router...').start();
 
   let models;
   try {
     models = await client.listModels();
-    spinner.succeed(`Fetched ${models.length} model(s) from ${config.baseUrl}`);
+    spinner.succeed(`Retrieved ${models.length} available model(s)`);
   } catch (err) {
     spinner.fail(`Failed to fetch models: ${err.message}`);
     return 1;
   }
 
+  // Sanitize: providers are strictly private
+  const sanitizedModels = models.map(m => {
+    const { provider, ...clean } = m;
+    return clean;
+  });
+
   if (selectModel) {
-    const exists = models.some(m => m.id === selectModel);
+    const exists = sanitizedModels.some(m => m.id === selectModel);
     if (!exists) {
-      process.stderr.write(`\n${colors.yellow}Warning: "${selectModel}" was not returned in the models list, but setting it anyway.${colors.reset}\n`);
+      process.stderr.write(`\n${colors.yellow}Notice: "${selectModel}" was not in the catalog, but setting it anyway.${colors.reset}\n`);
     }
     saveConfig({ model: selectModel });
     process.stdout.write(`\n${colors.green}✔ Active model set to:${colors.reset} ${colors.bold}${colors.brightCyan}${selectModel}${colors.reset}\n\n`);
     return 0;
   }
 
-  process.stdout.write(`\n${colors.bold}Available Models on ${config.baseUrl}:${colors.reset}\n\n`);
+  const rows = [];
+  rows.push(`${colors.bold}Available Frontier Models${colors.reset}\n`);
 
-  for (const m of models) {
+  for (const m of sanitizedModels) {
     const isCurrent = m.id === config.model;
-    const marker = isCurrent ? `${colors.brightGreen}➜ [ACTIVE]${colors.reset}` : '          ';
-    const nameStr = `${colors.bold}${m.id}${colors.reset}`;
-    const providerStr = m.provider?.name ? `${colors.dim}(${m.provider.name})${colors.reset}` : '';
-    const caps = [];
-    if (m.capabilities?.streaming) caps.push('stream');
-    if (m.capabilities?.tools) caps.push('tools');
-    const capStr = caps.length ? `${colors.gray}[${caps.join(', ')}]${colors.reset}` : '';
+    const marker = isCurrent ? `${colors.brightGreen}➜ [ACTIVE]${colors.reset} ` : '           ';
+    const nameStr = `${colors.bold}${colors.brightCyan}${m.id.padEnd(28)}${colors.reset}`;
 
-    process.stdout.write(`  ${marker} ${nameStr} ${providerStr} ${capStr}\n`);
+    const caps = [];
+    if (m.capabilities?.streaming) caps.push('streaming');
+    if (m.capabilities?.tools) caps.push('agent-tools');
+    const capStr = caps.length ? `${colors.dim}(${caps.join(', ')})${colors.reset}` : '';
+
+    rows.push(`  ${marker}${nameStr} ${capStr}`);
   }
 
-  process.stdout.write(`\n${colors.dim}To switch model: ${colors.cyan}poli models <model_name>${colors.reset} ${colors.dim}or inside chat type ${colors.yellow}/model <name>${colors.reset}\n\n`);
+  rows.push('');
+  rows.push(`${colors.dim}To switch model: ${colors.cyan}poli models <name>${colors.reset} ${colors.dim}or inside chat type ${colors.yellow}/model <name>${colors.reset}`);
+
+  process.stdout.write('\n' + box('Model Catalog', rows.join('\n'), { borderColor: colors.brightCyan }) + '\n\n');
   return 0;
 }

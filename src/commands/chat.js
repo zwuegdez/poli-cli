@@ -67,16 +67,17 @@ export async function cmdChat(initialPrompt = null, options = {}) {
     return 0;
   }
 
-  // Interactive REPL Mode
-  process.stdout.write('\n' + banner({
+  // Interactive Full-Terminal REPL Mode
+  renderFullTerminalHeader({
     model: config.model,
     cwd: workspaceDir,
-    proxy: 'poli-proxy',
+    endpoint: config.baseUrl,
     status: 'connected',
     branch: gitBranch
-  }) + '\n');
+  });
 
   while (true) {
+    printHotkeyGuide();
     const input = await promptManager.promptUser({
       model: config.model,
       tokens: session.tokenStats.totalTokens
@@ -180,20 +181,64 @@ export async function cmdChat(initialPrompt = null, options = {}) {
       }
     }
 
+    // Render user input card
+    renderUserCard(trimmed);
+
     // Agent turn
-    process.stdout.write('\n');
     await agent.runTurn(trimmed);
   }
 
   return 0;
 }
 
-export function printCommandPalette() {
+function renderFullTerminalHeader(info = {}) {
+  const {
+    version = '1.0.0',
+    model = 'gpt-6.1-sol',
+    cwd = process.cwd(),
+    endpoint = 'router.poliai.qzz.io',
+    status = 'connected',
+    branch = ''
+  } = info;
+
+  const width = Math.min(process.stdout.columns || 82, 82);
+  const border = '─'.repeat(Math.max(0, width - 2));
+
+  const workspaceDisplay = cwd.length > 40 ? '...' + cwd.slice(-37) : cwd;
+  const branchDisplay = branch ? ` ${colors.dim}git:(${colors.cyan}${branch}${colors.dim})${colors.reset}` : '';
+  const epClean = endpoint.replace(/^https?:\/\//, '').replace(/\/v1$/, '');
+
+  const lines = [
+    `${colors.brightCyan}╭${border}╮${colors.reset}`,
+    `${colors.brightCyan}│${colors.reset}  ${style.poliBrand()} ${colors.dim}v${version}${colors.reset}  ${colors.dim}•  Endpoint: ${colors.bold}${colors.brightMagenta}${epClean}${colors.reset}${' '.repeat(Math.max(0, width - 42 - epClean.length - version.length))}${colors.brightCyan}│${colors.reset}`,
+    `${colors.brightCyan}│${colors.reset}  ${colors.dim}Model:${colors.reset} ${colors.brightGreen}${model}${colors.reset}  ${colors.dim}│${colors.reset}  ${colors.dim}Status:${colors.reset} ${colors.green}● ${status}${colors.reset}  ${colors.dim}│${colors.reset}  ${colors.dim}Type ${colors.yellow}/${colors.reset} ${colors.dim}to show Codex-style menu${colors.reset}${' '.repeat(Math.max(0, width - 68 - model.length - status.length))}${colors.brightCyan}│${colors.reset}`,
+    `${colors.brightCyan}│${colors.reset}  ${colors.dim}Dir:${colors.reset}   ${colors.gray}${workspaceDisplay}${colors.reset}${branchDisplay}${' '.repeat(Math.max(0, width - 11 - workspaceDisplay.length - (branch ? branch.length + 8 : 0)))}${colors.brightCyan}│${colors.reset}`,
+    `${colors.brightCyan}╰${border}╯${colors.reset}`,
+  ];
+
+  process.stdout.write('\n' + lines.join('\n') + '\n');
+}
+
+function renderUserCard(text) {
   const width = Math.min(process.stdout.columns || 80, 80);
   const h = '─';
+  const v = '│';
+  const title = ` 👤 You `;
+  const topBorder = `╭─${colors.bold}${colors.brightCyan}${title}${colors.reset}${colors.dim}${h.repeat(Math.max(0, width - title.length - 3))}╮${colors.reset}`;
+  const bottomBorder = `╰${colors.dim}${h.repeat(Math.max(0, width - 2))}╯${colors.reset}`;
 
+  const lines = text.split('\n').map(l => `${colors.dim}${v}${colors.reset} ${colors.white}${l}${colors.reset}`);
+  process.stdout.write(`\n${topBorder}\n${lines.join('\n')}\n${bottomBorder}\n\n`);
+}
+
+function printHotkeyGuide() {
+  process.stdout.write(`${colors.dim}── [Enter] Send  •  [/] Slash Commands  •  [↑/↓] Select/History  •  [Ctrl+C] Exit ──${colors.reset}\n`);
+}
+
+export function printCommandPalette() {
+  const width = Math.min(process.stdout.columns || 80, 80);
   const rows = [];
-  rows.push(`${colors.bold}${colors.brightCyan}✦ POLI-CODE COMMAND PALETTE${colors.reset}\n`);
+  rows.push(`${colors.bold}${colors.brightCyan}✦ POLI-CODE COMMAND PALETTE (Codex-Style)${colors.reset}\n`);
 
   // Group by category
   const categories = {};
@@ -206,15 +251,14 @@ export function printCommandPalette() {
     rows.push(`${colors.bold}${colors.yellow}${cat.toUpperCase()}${colors.reset}`);
     for (const item of items) {
       const cmdStr = `${colors.bold}${colors.brightCyan}${item.cmd}${colors.reset}` + (item.args ? ` ${colors.dim}${item.args}${colors.reset}` : '');
-      const pad = 30 - item.cmd.length - (item.args ? item.args.length + 1 : 0);
+      const pad = 28 - item.cmd.length - (item.args ? item.args.length + 1 : 0);
       const padding = ' '.repeat(Math.max(2, pad));
-      const aliasStr = item.alias ? ` ${colors.gray}(alias: ${item.alias.join(', ')})${colors.reset}` : '';
-      rows.push(`  ${cmdStr}${padding}${colors.white}${item.desc}${colors.reset}${aliasStr}`);
+      rows.push(`  ${cmdStr}${padding}${colors.white}${item.desc}${colors.reset}`);
     }
     rows.push('');
   }
 
-  rows.push(`${colors.dim}Tip: End any prompt line with backslash \\ to type multiple lines before sending.${colors.reset}`);
+  rows.push(`${colors.dim}Type any slash command directly in the prompt or use arrow keys when typing / to select.${colors.reset}`);
 
   process.stdout.write('\n' + box('Slash Commands', rows.join('\n'), { borderColor: colors.brightCyan }) + '\n\n');
 }
@@ -282,7 +326,7 @@ function printSessionStatus(session, config, branch) {
   const content = [
     `${colors.dim}Session ID:${colors.reset}        ${session.id}`,
     `${colors.dim}Active Model:${colors.reset}      ${colors.brightGreen}${config.model}${colors.reset}`,
-    `${colors.dim}Inference Base:${colors.reset}    ${colors.cyan}${config.baseUrl}${colors.reset}`,
+    `${colors.dim}Router Endpoint:${colors.reset}   ${colors.cyan}${config.baseUrl}${colors.reset}`,
     `${colors.dim}Workspace:${colors.reset}         ${session.workspaceDir}`,
     `${colors.dim}Git Branch:${colors.reset}        ${branch || '(none)'}`,
     `${colors.dim}Auto-approve:${colors.reset}      ${config.autoApprove ? colors.yellow + 'Yes (-y)' : colors.gray + 'No'}${colors.reset}`,
@@ -300,7 +344,7 @@ function printTokensBreakdown(session) {
     `${colors.dim}Completion Tokens:${colors.reset} ${stats.completionTokens.toLocaleString()}`,
     `${colors.dim}Total Tokens:${colors.reset}      ${colors.bold}${colors.brightCyan}${stats.totalTokens.toLocaleString()}${colors.reset}`,
     ``,
-    `${colors.dim}Estimated Cost:${colors.reset}    ${colors.green}$0.00 (included with poli-proxy)${colors.reset}`
+    `${colors.dim}Estimated Cost:${colors.reset}    ${colors.green}$0.00 (included with poli-proxy router)${colors.reset}`
   ].join('\n');
 
   process.stdout.write('\n' + box('Token Metrics', content) + '\n\n');

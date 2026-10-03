@@ -5,17 +5,34 @@
 
 ---
 
+## ⚡ Quick 1-Line Curl Install
+
+You can install `poli-code` on any Linux or macOS machine with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zwuegdez/poli-cli/main/install.sh | bash
+```
+
+Once installed, the `poli` command is immediately available everywhere:
+```bash
+poli --version
+poli
+```
+
+---
+
 ## 🚀 Overview
 
 `poli-code` (command: `poli`) is a terminal-native, fully autonomous agentic coding assistant built to write code, refactor codebases, debug errors, navigate large repositories, and run shell commands in pair-programming sessions with developers.
 
-Backed directly by **`poli-proxy`**, `poli-code` provides zero-latency access to frontier models (such as `gpt-6.1-sol`, `claude-fable-5-1`, `claude-opus-5-5`, `grok-4.7`, `gpt-6-astra`), with live token streaming, agentic function calling, unified diff previews, and safe workspace tool execution.
+Backed directly by **`poli-proxy`**, `poli-code` provides zero-latency access to frontier models (including `gpt-6.1-sol`, `claude-fable-5-1`, `claude-opus-5-5`, `grok-4.7`, and `gpt-6-astra`), with live token streaming, agentic function calling, unified diff previews, and safe workspace tool execution.
 
 ---
 
 ## ✨ Features
 
 - **⚡ Run Command: `poli`**: Simple, intuitive command accessible anywhere in your shell.
+- **⌨️ Instant Command Palette with `/`**: Just type `/` or `/help` in the chat to see all commands, categories, and shortcuts.
 - **🤖 Autonomous Agent Loop**: Observes your codebase, plans multi-step solutions, executes tools, evaluates feedback, and refines until the task is complete.
 - **🛠️ Built-in Tool Suite**:
   - `view_file`: Read workspace files with line numbers, slicing, and truncation protection.
@@ -26,36 +43,20 @@ Backed directly by **`poli-proxy`**, `poli-code` provides zero-latency access to
   - `file_search`: Glob and substring filename search.
   - `list_dir`: Interactive directory inspection.
 - **💬 Dual Execution Modes**:
-  - **Interactive REPL**: Rich terminal interface with spinners, live streaming, and slash commands.
+  - **Interactive REPL**: Rich terminal interface with rounded cards, live spinners with timers, and slash commands.
   - **One-Shot Mode**: Run single tasks from command-line arguments: `poli "fix the failing tests"`.
-- **🎨 Rich Terminal UI**:
+- **🎨 Enhanced Terminal UI**:
+  - Rounded border cards for assistant and tool executions.
   - Colorized unified diffs before modifying files.
   - Interactive approvals (with `-y` / `--yes` bypass flag).
-  - Live animated spinners during LLM reasoning and tool execution.
+  - Live animated spinners with elapsed time counter (`[2.4s]`).
   - Markdown syntax highlighting for code blocks in terminal.
+  - Live token metrics counter in prompt.
 - **🔄 Multi-Model Switching**:
   - Seamlessly switch between models via `poli models <name>` or `/model <name>`.
 - **🔌 Powered by `poli-proxy`**:
   - Automatic detection of local `poli-proxy` (`http://127.0.0.1:8000/v1`) or remote endpoint (`https://api.poliai.qzz.io/v1`).
   - Preconfigured authentication and credential management.
-
----
-
-## 📦 Installation
-
-### Global Symlink / PATH
-If cloned locally on your machine or VPS:
-```bash
-cd /home/ubuntu/poli-cli
-sudo ln -sf $(pwd)/bin/poli.js /usr/local/bin/poli
-sudo ln -sf $(pwd)/bin/poli.js /usr/local/bin/poli-code
-```
-
-Verify installation:
-```bash
-which poli
-poli --version
-```
 
 ---
 
@@ -67,7 +68,14 @@ Simply type:
 poli
 ```
 
-### 2. Run a One-Shot Coding Task
+### 2. View All Commands
+In the interactive prompt, type `/` or press `Tab`:
+```text
+✦ poli [gpt-6.1-sol] › /
+```
+This instantly renders the full categorized Command Palette!
+
+### 3. Run a One-Shot Coding Task
 ```bash
 # Ask Poli to perform an action directly
 poli "create an Express web server in server.js on port 4000"
@@ -76,12 +84,12 @@ poli "create an Express web server in server.js on port 4000"
 poli -y "audit package.json and run npm audit"
 ```
 
-### 3. Check Proxy Health & Configuration
+### 4. Check Proxy Health & Configuration
 ```bash
 poli status
 ```
 
-### 4. Explore & Switch Models
+### 5. Explore & Switch Models
 ```bash
 # List all models available on your proxy
 poli models
@@ -92,23 +100,27 @@ poli models grok-4.7
 
 ---
 
-## ⚡ REPL Slash Commands
+## ⚡ REPL Slash Commands Reference
 
-Inside the interactive `poli` session, you can use built-in slash commands:
+Inside the interactive `poli` session, you can use these commands:
 
-| Command | Description |
-|---|---|
-| `/help` | Display the interactive help menu |
-| `/model [name]` | View current model or switch to another model |
-| `/models` | List all available models from `poli-proxy` |
-| `/diff` | Display the current uncommitted git diff in the workspace |
-| `/clear` | Clear the current conversation history |
-| `/compact` | Compress and summarize context to preserve token limits |
-| `/status` | View token usage and session statistics |
-| `/run <command>` | Execute a shell command directly without LLM turn |
-| `/exit` or `/quit` | Exit the CLI session |
+| Command | Arguments | Description |
+|---|---|---|
+| **`/`** or **`/help`** | | Display the full interactive Command Palette |
+| **`/model`** | `[name]` | View active model or switch to a new model |
+| **`/models`** | | Browse all available models from `poli-proxy` |
+| **`/tools`** | | List all active agent tools and parameters |
+| **`/diff`** | | Display uncommitted git diff in the workspace |
+| **`/run`** | `<cmd>` | Execute a shell command directly without LLM turn |
+| **`/status`** | | View proxy health, model, and session metrics |
+| **`/tokens`** | | Show detailed prompt/completion token metrics |
+| **`/compact`** | | Compress and summarize context window |
+| **`/history`** | | View recent conversation turn history |
+| **`/clear`** | | Clear conversation context and start fresh |
+| **`/config`** | `[get\|set]` | View or modify local CLI configuration |
+| **`/exit`** or **`/quit`** | | Exit the Poli-code CLI |
 
-> **Tip**: End any line with a trailing backslash `\` to write multi-line prompts before sending!
+> **Tip**: End any prompt line with a trailing backslash `\` to write multi-line prompts before sending!
 
 ---
 
@@ -142,6 +154,7 @@ You can also configure `poli-code` via environment variables:
 
 ```
 poli-cli/
+├── install.sh             # Standalone curl installer
 ├── bin/
 │   └── poli.js            # Executable entrypoint (#!/usr/bin/env node)
 ├── src/
@@ -170,9 +183,9 @@ poli-cli/
 │   │   ├── file_search.js # Glob file search
 │   │   └── list_dir.js    # Directory tree walker
 │   └── ui/                # Terminal user interface
-│       ├── theme.js       # ANSI styles, symbols, badges, banner
-│       ├── prompt.js      # Readline manager with auto-complete
-│       ├── spinner.js     # Non-blocking animated terminal spinner
+│       ├── theme.js       # ANSI styles, symbols, badges, banner, cards
+│       ├── prompt.js      # Readline manager with auto-complete & / palette
+│       ├── spinner.js     # Animated spinner with elapsed timer
 │       ├── diff.js        # Unified diff colorizer
 │       └── markdown.js    # Markdown syntax highlighter
 ├── package.json

@@ -1,7 +1,7 @@
 // Agentic loop orchestrator
 import { ALL_TOOLS, executeTool } from './tools/index.js';
 import { Spinner } from './ui/spinner.js';
-import { colors, style, symbols } from './ui/theme.js';
+import { colors, style, symbols, toolCard } from './ui/theme.js';
 import { renderMarkdown } from './ui/markdown.js';
 
 export class PoliAgent {
@@ -93,12 +93,7 @@ export class PoliAgent {
           fnArgs = { raw: tc.function?.arguments };
         }
 
-        const argsSummary = Object.entries(fnArgs)
-          .map(([k, v]) => `${k}=${typeof v === 'string' ? (v.length > 25 ? v.slice(0, 22) + '...' : v) : JSON.stringify(v)}`)
-          .join(', ');
-
-        process.stdout.write(`\n${style.badge('TOOL', colors.bgMagenta)} ${colors.bold}${fnName}${colors.reset} ${colors.dim}(${argsSummary})${colors.reset}\n`);
-
+        const toolStart = Date.now();
         const toolSpinner = new Spinner(`Executing ${fnName}...`).start();
 
         const toolContext = {
@@ -108,14 +103,24 @@ export class PoliAgent {
         };
 
         const result = await executeTool(fnName, fnArgs, toolContext);
+        const elapsed = Date.now() - toolStart;
 
         if (result?.error) {
           toolSpinner.fail(`${fnName} error: ${result.error}`);
         } else if (result?.rejected) {
           toolSpinner.info(`${fnName} cancelled by user`);
         } else {
-          toolSpinner.succeed(`${fnName} done`);
+          toolSpinner.succeed(`${fnName} completed (${elapsed}ms)`);
         }
+
+        // Output clean tool summary card
+        const card = toolCard({
+          name: fnName,
+          args: fnArgs,
+          status: result?.error ? 'error' : 'success',
+          elapsedMs: elapsed
+        });
+        process.stdout.write(`\n${card}\n\n`);
 
         // Add tool result to session messages
         this.session.addMessage({
@@ -126,7 +131,7 @@ export class PoliAgent {
         });
       }
 
-      // After tool execution, the loop continues to feed tool results back to LLM!
+      // Loop continues with tool results fed back to LLM!
     }
 
     if (step >= this.maxSteps) {

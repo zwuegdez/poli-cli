@@ -2,7 +2,23 @@
 import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
-import { colors, symbols } from './theme.js';
+import { colors, style, symbols } from './theme.js';
+
+export const COMMAND_LIST = [
+  { cmd: '/help', alias: ['/?', '/'], desc: 'Show all available commands & shortcuts', category: 'Commands' },
+  { cmd: '/model', args: '[name]', desc: 'View or switch the active LLM model', category: 'Agent & Model' },
+  { cmd: '/models', desc: 'Browse all available models from proxy', category: 'Agent & Model' },
+  { cmd: '/tools', desc: 'Show all active agent tools and parameters', category: 'Agent & Model' },
+  { cmd: '/diff', desc: 'Show uncommitted git diff in the workspace', category: 'Workspace & Git' },
+  { cmd: '/run', args: '<command>', desc: 'Execute a shell command directly', category: 'Workspace & Git' },
+  { cmd: '/status', desc: 'Show proxy connection, model, & token metrics', category: 'Session & Memory' },
+  { cmd: '/tokens', desc: 'Show detailed token usage breakdown', category: 'Session & Memory' },
+  { cmd: '/compact', desc: 'Summarize and compress context window', category: 'Session & Memory' },
+  { cmd: '/history', desc: 'View recent conversation turn history', category: 'Session & Memory' },
+  { cmd: '/clear', desc: 'Clear conversation context and start fresh', category: 'Session & Memory' },
+  { cmd: '/config', args: '[get|set]', desc: 'View or modify CLI configuration', category: 'Settings' },
+  { cmd: '/exit', alias: ['/quit', '/q'], desc: 'Exit Poli-code', category: 'Exit' }
+];
 
 export class PromptManager {
   constructor(options = {}) {
@@ -21,9 +37,7 @@ export class PromptManager {
           .filter(Boolean);
         this.history = lines.slice(-200);
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
   saveHistory(line) {
@@ -33,19 +47,20 @@ export class PromptManager {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.appendFileSync(this.historyFile, line + '\n', 'utf8');
       this.history.push(line);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
   completer(line) {
-    const slashCommands = [
-      '/help', '/model', '/models', '/clear', '/compact',
-      '/history', '/status', '/diff', '/run', '/exit', '/quit'
-    ];
-
     if (line.startsWith('/')) {
+      const slashCommands = COMMAND_LIST.map(c => c.cmd);
       const hits = slashCommands.filter(c => c.startsWith(line));
+
+      if (line === '/') {
+        // Show inline hints on terminal
+        process.stdout.write('\n\x1b[36mCommands:\x1b[0m ' + slashCommands.slice(0, 10).join(', ') + '...\n');
+        return [slashCommands, line];
+      }
+
       return [hits.length ? hits : slashCommands, line];
     }
 
@@ -61,36 +76,22 @@ export class PromptManager {
           const hits = files.filter(f => f.startsWith(base)).map(f => path.join(dir, f));
           return [hits, lastPart];
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
 
     return [[], line];
   }
 
-  ask(questionText) {
+  promptUser({ model = 'gpt-6.1-sol', tokens = 0 } = {}) {
     return new Promise((resolve) => {
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        completer: (l) => this.completer(l)
-      });
+      const tokenPill = tokens > 0 ? ` ${colors.dim}(${tokens.toLocaleString()} tok)${colors.reset}` : '';
+      const promptString = `\n${colors.bold}${colors.brightCyan}✦ poli${colors.reset} ${colors.dim}[${colors.green}${model}${colors.dim}]${tokenPill} ${colors.brightCyan}›${colors.reset} `;
 
-      rl.question(questionText, (answer) => {
-        rl.close();
-        resolve(answer.trim());
-      });
-    });
-  }
-
-  promptUser({ model = 'gpt-6.1-sol' } = {}) {
-    return new Promise((resolve) => {
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
         completer: (l) => this.completer(l),
-        prompt: `\n${colors.brightCyan}✦ poli${colors.reset} ${colors.dim}(${model})${colors.reset} ${colors.brightCyan}›${colors.reset} `
+        prompt: promptString
       });
 
       let buffer = '';
@@ -98,7 +99,7 @@ export class PromptManager {
       rl.prompt();
 
       rl.on('line', (line) => {
-        // If line ends with backslash, allow multiline input
+        // Multiline support via trailing backslash
         if (line.endsWith('\\')) {
           buffer += line.slice(0, -1) + '\n';
           rl.setPrompt(`${colors.dim}  ... ›${colors.reset} `);
@@ -108,7 +109,7 @@ export class PromptManager {
 
         const fullInput = (buffer + line).trim();
         buffer = '';
-        if (fullInput) {
+        if (fullInput && !fullInput.startsWith('/')) {
           this.saveHistory(fullInput);
         }
         rl.close();

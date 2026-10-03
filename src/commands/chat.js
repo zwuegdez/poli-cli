@@ -221,14 +221,12 @@ function renderFullTerminalHeader(info = {}) {
 
 function renderUserCard(text) {
   const width = Math.min(process.stdout.columns || 80, 80);
-  const h = '─';
-  const v = '│';
   const title = ` 👤 You `;
-  const topBorder = `╭─${colors.bold}${colors.brightCyan}${title}${colors.reset}${colors.dim}${h.repeat(Math.max(0, width - title.length - 3))}╮${colors.reset}`;
-  const bottomBorder = `╰${colors.dim}${h.repeat(Math.max(0, width - 2))}╯${colors.reset}`;
+  const topBorder = `╭─${colors.bold}${colors.cyan}${title}${colors.reset}${colors.dim}${'─'.repeat(Math.max(0, width - title.length - 3))}╮${colors.reset}`;
+  const bottomBorder = `╰${colors.dim}${'─'.repeat(Math.max(0, width - 2))}╯${colors.reset}`;
 
-  const lines = text.split('\n').map(l => `${colors.dim}${v}${colors.reset} ${colors.white}${l}${colors.reset}`);
-  process.stdout.write(`\n${topBorder}\n${lines.join('\n')}\n${bottomBorder}\n\n`);
+  const lines = text.split('\n').map(l => `${colors.dim}│${colors.reset} ${colors.white}${l}${colors.reset}`);
+  process.stdout.write(`\n${colors.dim}${topBorder}${colors.reset}\n${lines.join('\n')}\n${colors.dim}${bottomBorder}${colors.reset}\n\n`);
 }
 
 function printHotkeyGuide() {

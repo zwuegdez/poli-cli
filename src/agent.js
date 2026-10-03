@@ -25,6 +25,7 @@ export class PoliAgent {
       step++;
       let streamedAssistantText = '';
       let isFirstChunk = true;
+      let streamedRawLines = 0;
 
       // Call LLM via Router
       spinner.start(`Thinking (${this.config.model})...`);
@@ -43,10 +44,12 @@ export class PoliAgent {
               if (isFirstChunk) {
                 spinner.stop();
                 isFirstChunk = false;
-                process.stdout.write(`\n${colors.dim}╭─ ${colors.bold}${colors.brightCyan}✦ poli-code${colors.reset} ${colors.dim}(${this.config.model}) ${'─'.repeat(Math.max(2, 50))}╮${colors.reset}\n`);
               }
               process.stdout.write(chunk.text);
               streamedAssistantText += chunk.text;
+              if (chunk.text.includes('\n')) {
+                streamedRawLines += (chunk.text.match(/\n/g) || []).length;
+              }
             }
           }
         });
@@ -57,8 +60,29 @@ export class PoliAgent {
 
       spinner.stop();
       if (streamedAssistantText) {
-        if (!streamedAssistantText.endsWith('\n')) process.stdout.write('\n');
-        process.stdout.write(`${colors.dim}╰${'─'.repeat(Math.max(2, 70))}╯${colors.reset}\n\n`);
+        // Clear raw stream output if it fits, else just append
+        const terminalHeight = process.stdout.rows || 24;
+        const totalLines = streamedRawLines + (streamedAssistantText.length / 80);
+        if (totalLines < terminalHeight - 3) {
+          // erase up the number of lines
+          // wait, erase up is tricky if line wrap happened. Let's just print the markdown directly!
+          // Actually, it's safer to just print a small separator
+        }
+        
+        // We will just clear line by line for streamedRawLines (rough approx)
+        if (totalLines < terminalHeight - 3) {
+          process.stdout.write(`\x1b[${Math.floor(totalLines)}A\x1b[0J`);
+        } else {
+          process.stdout.write('\n\n'); // Fallback separator
+        }
+
+        const formatted = renderMarkdown(streamedAssistantText);
+        const boxLines = [
+          `\n${colors.dim}╭─ ${colors.bold}${colors.brightCyan}✦ poli-code${colors.reset} ${colors.dim}(${this.config.model}) ${'─'.repeat(Math.max(2, 50))}╮${colors.reset}`,
+          ...formatted.split('\n').map(l => `${colors.dim}│${colors.reset} ${l}`),
+          `${colors.dim}╰${'─'.repeat(Math.max(2, 70))}╯${colors.reset}\n`
+        ];
+        process.stdout.write(boxLines.join('\n') + '\n');
       }
 
       const { message, usage } = response;

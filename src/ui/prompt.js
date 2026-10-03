@@ -138,12 +138,36 @@ export class PromptManager {
         // Re-render current prompt line
         readline.cursorTo(stdout, 0);
         readline.clearLine(stdout, 0);
-        stdout.write(promptPrefix.replace(/^\n/, '') + buffer);
+        
+        let displayBuffer = buffer;
+        let ghostText = '';
+        
+        // Ghost text and syntax highlighting
+        const matches = getMatchingCommands();
+        if (buffer.startsWith('/') && !buffer.includes(' ')) {
+          if (matches.length > 0) {
+            const selected = matches[selectedCommandIndex] || matches[0];
+            if (selected.cmd.startsWith(buffer.toLowerCase())) {
+              ghostText = selected.cmd.slice(buffer.length) + (selected.args ? ' ' + selected.args : '');
+            }
+          }
+          // Highlight command in cyan
+          displayBuffer = `${colors.brightCyan}${buffer}${colors.reset}`;
+        } else if (buffer.startsWith('/')) {
+          // Command + args
+          const spaceIdx = buffer.indexOf(' ');
+          displayBuffer = `${colors.brightCyan}${buffer.slice(0, spaceIdx)}${colors.reset}${colors.white}${buffer.slice(spaceIdx)}${colors.reset}`;
+        }
+
+        // Print prefix + colored buffer + ghost text
+        const prefixPlainLength = 3; // " > " length approximation
+        stdout.write(promptPrefix.replace(/^\n/, '') + displayBuffer + colors.dim + ghostText + colors.reset);
+        
+        // Reset cursor to the actual edit position
         readline.cursorTo(stdout, (promptPrefix.length - 1) + cursorPos);
 
         // If typing a slash command, render Codex-style interactive menu
-        const matches = getMatchingCommands();
-        if (matches.length > 0) {
+        if (matches.length > 0 && buffer.startsWith('/') && !buffer.includes(' ')) {
           const menuLines = [];
           const width = Math.min(stdout.columns || 80, 80);
           const maxVisible = Math.min(matches.length, 6);
@@ -151,6 +175,7 @@ export class PromptManager {
           if (selectedCommandIndex >= matches.length) selectedCommandIndex = 0;
           if (selectedCommandIndex < 0) selectedCommandIndex = matches.length - 1;
 
+          // Float the menu up with a drop shadow aesthetic
           menuLines.push(`\n${colors.dim}╭─ ${colors.bold}${colors.brightCyan}Commands${colors.reset} ${colors.dim}(↑/↓ to navigate, Tab/Enter to select) ${'─'.repeat(Math.max(2, width - 48))}╮${colors.reset}`);
 
           for (let i = 0; i < maxVisible; i++) {
@@ -161,7 +186,7 @@ export class PromptManager {
             const desc = item.desc.length > 40 ? item.desc.slice(0, 37) + '...' : item.desc;
 
             if (isSelected) {
-              menuLines.push(`${colors.dim}│${colors.reset} ${pointer}${colors.brightCyan}${cmdName}${colors.reset} ${colors.white}${desc}${colors.reset}${' '.repeat(Math.max(1, width - 30 - desc.length))}${colors.dim}│${colors.reset}`);
+              menuLines.push(`${colors.dim}│${colors.reset} ${pointer}${colors.brightCyan}${cmdName}${colors.reset} ${colors.brightWhite}${desc}${colors.reset}${' '.repeat(Math.max(1, width - 30 - desc.length))}${colors.dim}│${colors.reset}`);
             } else {
               menuLines.push(`${colors.dim}│${colors.reset} ${pointer}${colors.cyan}${cmdName}${colors.reset} ${colors.dim}${desc}${colors.reset}${' '.repeat(Math.max(1, width - 30 - desc.length))}${colors.dim}│${colors.reset}`);
             }

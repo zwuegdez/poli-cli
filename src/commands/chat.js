@@ -7,8 +7,10 @@ import { PoliAgent } from '../agent.js';
 import { getSystemPrompt } from '../system-prompt.js';
 import { PromptManager, COMMAND_LIST } from '../ui/prompt.js';
 import { ALL_TOOLS } from '../tools/index.js';
-import { banner, colors, style, box } from '../ui/theme.js';
-import { cmdModels } from './models.js';
+import { toolDetails } from '../ui/tool-details.js';
+import { banner, colors, style, section, chatMessage, wrapText, terminalWidth } from '../ui/theme.js';
+import { chooseModel } from './models.js';
+import { selectChoice } from '../ui/select.js';
 import { cmdConfig } from './config.js';
 import { execSync } from 'node:child_process';
 
@@ -17,6 +19,7 @@ export async function cmdChat(initialPrompt = null, options = {}) {
 
   // Override options
   if (options.model) config.model = options.model;
+  if (options.mode) config.mode = options.mode;
   if (options.baseUrl) config.baseUrl = options.baseUrl;
   if (options.yes) config.autoApprove = true;
 
@@ -28,7 +31,8 @@ export async function cmdChat(initialPrompt = null, options = {}) {
 
   const client = new PoliClient({
     baseUrl: config.baseUrl,
-    apiKey: creds.apiKey
+    apiKey: creds.apiKey,
+    timeoutMs: config.requestTimeoutMs
   });
 
   const promptManager = new PromptManager({
@@ -50,7 +54,7 @@ export async function cmdChat(initialPrompt = null, options = {}) {
   } catch {}
 
   // Initialize session with rich system prompt
-  const sysPrompt = getSystemPrompt({ workspaceDir, model: config.model });
+  const sysPrompt = getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode });
   session.addMessage({ role: 'system', content: sysPrompt });
 
   const agent = new PoliAgent({
@@ -63,8 +67,8 @@ export async function cmdChat(initialPrompt = null, options = {}) {
   // If one-shot prompt was provided via command line:
   if (initialPrompt && initialPrompt.trim()) {
     process.stdout.write(`\n${colors.bold}${colors.brightCyan}✦ poli${colors.reset} ${colors.dim}› ${initialPrompt}${colors.reset}\n\n`);
-    await agent.runTurn(initialPrompt.trim());
-    return 0;
+    const result = await agent.runTurn(initialPrompt.trim());
+    return result.error ? 1 : result.cancelled ? 130 : 0;
   }
 
   // Interactive Full-Terminal REPL Mode
@@ -72,14 +76,15 @@ export async function cmdChat(initialPrompt = null, options = {}) {
     model: config.model,
     cwd: workspaceDir,
     endpoint: config.baseUrl,
-    status: 'connected',
+    autoApprove: config.autoApprove,
+    mode: config.mode,
     branch: gitBranch
   });
 
   while (true) {
-    printHotkeyGuide();
     const input = await promptManager.promptUser({
       model: config.model,
+      mode: config.mode,
       tokens: session.tokenStats.totalTokens
     });
     const trimmed = input ? input.trim() : '';
@@ -99,13 +104,13 @@ export async function cmdChat(initialPrompt = null, options = {}) {
       }
 
       if (rawCmd === '/exit' || rawCmd === '/quit' || rawCmd === '/q') {
-        process.stdout.write(`\n${colors.dim}Goodbye! Happy coding with Poli.${colors.reset}\n\n`);
+        process.stdout.write(`${colors.dim}Goodbye!${colors.reset}\n`);
         break;
       }
 
       if (rawCmd === '/clear') {
         session.clear();
-        session.addMessage({ role: 'system', content: getSystemPrompt({ workspaceDir, model: config.model }) });
+        session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode }) };
         process.stdout.write(`\n${colors.green}✔ Conversation context cleared.${colors.reset}\n\n`);
         continue;
       }
@@ -116,25 +121,46 @@ export async function cmdChat(initialPrompt = null, options = {}) {
         continue;
       }
 
-      if (rawCmd === '/model') {
-        if (!arg) {
-          process.stdout.write(`\n${colors.dim}Current model:${colors.reset} ${colors.bold}${colors.brightGreen}${config.model}${colors.reset}\n`);
-          process.stdout.write(`${colors.dim}Switch model:${colors.reset}  ${colors.cyan}/model <name>${colors.reset} ${colors.dim}or type${colors.reset} ${colors.yellow}/models${colors.reset}\n\n`);
-        } else {
-          config.model = arg;
-          saveConfig({ model: arg });
-          process.stdout.write(`\n${colors.green}✔ Active model switched to:${colors.reset} ${colors.bold}${colors.brightCyan}${arg}${colors.reset}\n\n`);
+      if (rawCmd === '/models' || rawCmd === '/model') {
+        const model = await chooseModel({ client, config });
+        if (model) {
+          config.model = model.id;
+          agent.setModel(model);
+          saveConfig({ model: model.id });
+          session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: model.id, mode: config.mode }) };
+          process.stdout.write(`\n${style.green('✓')} Active model: ${style.bold(model.id)}\n\n`);
         }
         continue;
       }
 
-      if (rawCmd === '/models') {
-        await cmdModels();
+      if (rawCmd === '/mode') {
+        const mode = await selectChoice({ title: 'How should poli help?', current: config.mode || 'agent', choices: [
+          { value: 'agent', label: 'Agent', description: 'Chat, inspect files, edit code, and run commands with approvals.' },
+          { value: 'chat', label: 'Chat', description: 'Conversation only. No workspace tools.' },
+        ] });
+        if (mode) {
+          config.mode = mode;
+          saveConfig({ mode });
+          session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: config.model, mode }) };
+          console.log(`\n${style.green('✓')} ${mode === 'chat' ? 'Chat' : 'Agent'} mode\n`);
+        }
+        continue;
+      }
+
+      if (rawCmd === '/retry' || rawCmd === '/continue') {
+        // Continue the pending turn after errors, cancellation, or output truncation.
+        const last = session.messages.at(-1);
+        await agent.runTurn(last?.role === 'assistant' ? 'Continue your previous answer or unfinished task.' : null);
         continue;
       }
 
       if (rawCmd === '/tools') {
         printToolsList();
+        continue;
+      }
+
+      if (rawCmd === '/details') {
+        process.stdout.write('\n' + toolDetails(session.messages) + '\n\n');
         continue;
       }
 
@@ -192,51 +218,15 @@ export async function cmdChat(initialPrompt = null, options = {}) {
 }
 
 function renderFullTerminalHeader(info = {}) {
-  const {
-    version = '1.0.0',
-    model = 'gpt-6.1-sol',
-    cwd = process.cwd(),
-    endpoint = 'router.poliai.qzz.io',
-    status = 'connected',
-    branch = ''
-  } = info;
-
-  const width = Math.min(process.stdout.columns || 82, 82);
-  const border = '─'.repeat(Math.max(0, width - 2));
-
-  const workspaceDisplay = cwd.length > 40 ? '...' + cwd.slice(-37) : cwd;
-  const branchDisplay = branch ? ` ${colors.dim}git:(${colors.cyan}${branch}${colors.dim})${colors.reset}` : '';
-  const epClean = endpoint.replace(/^https?:\/\//, '').replace(/\/v1$/, '');
-
-  const lines = [
-    `${colors.brightCyan}╭${border}╮${colors.reset}`,
-    `${colors.brightCyan}│${colors.reset}  ${style.poliBrand()} ${colors.dim}v${version}${colors.reset}  ${colors.dim}•  Endpoint: ${colors.bold}${colors.brightMagenta}${epClean}${colors.reset}${' '.repeat(Math.max(0, width - 42 - epClean.length - version.length))}${colors.brightCyan}│${colors.reset}`,
-    `${colors.brightCyan}│${colors.reset}  ${colors.dim}Model:${colors.reset} ${colors.brightGreen}${model}${colors.reset}  ${colors.dim}│${colors.reset}  ${colors.dim}Status:${colors.reset} ${colors.green}● ${status}${colors.reset}  ${colors.dim}│${colors.reset}  ${colors.dim}Type ${colors.yellow}/${colors.reset} ${colors.dim}to show Codex-style menu${colors.reset}${' '.repeat(Math.max(0, width - 68 - model.length - status.length))}${colors.brightCyan}│${colors.reset}`,
-    `${colors.brightCyan}│${colors.reset}  ${colors.dim}Dir:${colors.reset}   ${colors.gray}${workspaceDisplay}${colors.reset}${branchDisplay}${' '.repeat(Math.max(0, width - 11 - workspaceDisplay.length - (branch ? branch.length + 8 : 0)))}${colors.brightCyan}│${colors.reset}`,
-    `${colors.brightCyan}╰${border}╯${colors.reset}`,
-  ];
-
-  process.stdout.write('\n' + lines.join('\n') + '\n');
+  process.stdout.write('\n' + banner(info) + '\n\n');
 }
 
 function renderUserCard(text) {
-  const width = Math.min(process.stdout.columns || 80, 80);
-  const title = ` 👤 You `;
-  const topBorder = `╭─${colors.bold}${colors.cyan}${title}${colors.reset}${colors.dim}${'─'.repeat(Math.max(0, width - title.length - 3))}╮${colors.reset}`;
-  const bottomBorder = `╰${colors.dim}${'─'.repeat(Math.max(0, width - 2))}╯${colors.reset}`;
-
-  const lines = text.split('\n').map(l => `${colors.dim}│${colors.reset} ${colors.white}${l}${colors.reset}`);
-  process.stdout.write(`\n${colors.dim}${topBorder}${colors.reset}\n${lines.join('\n')}\n${colors.dim}${bottomBorder}${colors.reset}\n\n`);
-}
-
-function printHotkeyGuide() {
-  process.stdout.write(`${colors.dim}── [Enter] Send  •  [/] Slash Commands  •  [↑/↓] Select/History  •  [Ctrl+C] Exit ──${colors.reset}\n`);
+  process.stdout.write(chatMessage('user', text) + '\n');
 }
 
 export function printCommandPalette() {
-  const width = Math.min(process.stdout.columns || 80, 80);
   const rows = [];
-  rows.push(`${colors.bold}${colors.brightCyan}✦ POLI-CODE COMMAND PALETTE (Codex-Style)${colors.reset}\n`);
 
   // Group by category
   const categories = {};
@@ -246,24 +236,27 @@ export function printCommandPalette() {
   }
 
   for (const [cat, items] of Object.entries(categories)) {
-    rows.push(`${colors.bold}${colors.yellow}${cat.toUpperCase()}${colors.reset}`);
+    rows.push(style.dim(cat));
     for (const item of items) {
       const cmdStr = `${colors.bold}${colors.brightCyan}${item.cmd}${colors.reset}` + (item.args ? ` ${colors.dim}${item.args}${colors.reset}` : '');
-      const pad = 28 - item.cmd.length - (item.args ? item.args.length + 1 : 0);
-      const padding = ' '.repeat(Math.max(2, pad));
-      rows.push(`  ${cmdStr}${padding}${colors.white}${item.desc}${colors.reset}`);
+      const label = item.cmd + (item.args ? ' ' + item.args : '');
+      if (terminalWidth() >= 65) rows.push(`  ${cmdStr}${' '.repeat(Math.max(2, 26 - label.length))}${style.dim(item.desc)}`);
+      else {
+        rows.push(`  ${cmdStr}`);
+        rows.push(...wrapText(item.desc, Math.max(1, terminalWidth() - 8)).map(line => `    ${style.dim(line)}`));
+      }
     }
     rows.push('');
   }
 
   rows.push(`${colors.dim}Type any slash command directly in the prompt or use arrow keys when typing / to select.${colors.reset}`);
 
-  process.stdout.write('\n' + box('Slash Commands', rows.join('\n'), { borderColor: colors.brightCyan }) + '\n\n');
+  process.stdout.write('\n' + section('Slash Commands', rows.join('\n')) + '\n\n');
 }
 
 function printToolsList() {
   const rows = [
-    `${colors.bold}Active Agent Tools in Poli-code:${colors.reset}\n`
+    `${colors.bold}Available tools:${colors.reset}\n`
   ];
 
   for (const t of ALL_TOOLS) {
@@ -277,7 +270,7 @@ function printToolsList() {
     rows.push('');
   }
 
-  process.stdout.write('\n' + box('Agentic Tools', rows.join('\n')) + '\n\n');
+  process.stdout.write('\n' + section('Agentic Tools', rows.join('\n')) + '\n\n');
 }
 
 function printHistory(session) {
@@ -323,6 +316,7 @@ function runDirectCommand(cmd, cwd) {
 function printSessionStatus(session, config, branch) {
   const content = [
     `${colors.dim}Session ID:${colors.reset}        ${session.id}`,
+    `${colors.dim}Mode:${colors.reset}              ${config.mode === 'chat' ? 'Chat' : 'Agent'}`,
     `${colors.dim}Active Model:${colors.reset}      ${colors.brightGreen}${config.model}${colors.reset}`,
     `${colors.dim}Router Endpoint:${colors.reset}   ${colors.cyan}${config.baseUrl}${colors.reset}`,
     `${colors.dim}Workspace:${colors.reset}         ${session.workspaceDir}`,
@@ -332,7 +326,7 @@ function printSessionStatus(session, config, branch) {
     `${colors.dim}Total Tokens:${colors.reset}      ${colors.bold}${session.tokenStats.totalTokens.toLocaleString()}${colors.reset}`
   ].join('\n');
 
-  process.stdout.write('\n' + box('Session Overview', content) + '\n\n');
+  process.stdout.write('\n' + section('Session Overview', content) + '\n\n');
 }
 
 function printTokensBreakdown(session) {
@@ -342,8 +336,8 @@ function printTokensBreakdown(session) {
     `${colors.dim}Completion Tokens:${colors.reset} ${stats.completionTokens.toLocaleString()}`,
     `${colors.dim}Total Tokens:${colors.reset}      ${colors.bold}${colors.brightCyan}${stats.totalTokens.toLocaleString()}${colors.reset}`,
     ``,
-    `${colors.dim}Estimated Cost:${colors.reset}    ${colors.green}$0.00 (included with poli-proxy router)${colors.reset}`
+    `${colors.dim}Usage reported by the router for this session.${colors.reset}`
   ].join('\n');
 
-  process.stdout.write('\n' + box('Token Metrics', content) + '\n\n');
+  process.stdout.write('\n' + section('Token Metrics', content) + '\n\n');
 }

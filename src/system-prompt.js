@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 
-export function getSystemPrompt({ workspaceDir = process.cwd(), model = 'gpt-6.1-sol' } = {}) {
+export function getSystemPrompt({ workspaceDir = process.cwd(), model = 'gpt-6.1-sol', mode = 'agent' } = {}) {
   let gitBranch = '';
   let gitStatus = '';
 
@@ -34,6 +34,8 @@ export function getSystemPrompt({ workspaceDir = process.cwd(), model = 'gpt-6.1
       .slice(0, 30);
   } catch {}
 
+  if (mode === 'chat') return `You are Poli, a helpful conversational assistant. Answer naturally in the user's language. You are using ${model}. Workspace tools are disabled in Chat mode; do not claim to read files, run commands, or make changes. The user can select Agent mode with /mode when they want local actions.`;
+
   return `You are Poli-CLI (run command: poli), an elite agentic AI software engineer and terminal pair programmer powered by poli-proxy.
 You work alongside developers directly inside their local workspace to write code, debug issues, navigate repositories, execute commands, and solve complex software engineering problems.
 
@@ -44,6 +46,9 @@ You work alongside developers directly inside their local workspace to write cod
 - Git Branch: ${gitBranch || 'none/uninitialized'}
 ${gitStatus ? `- Git Status:\n${gitStatus.split('\n').slice(0, 10).join('\n')}` : ''}
 - Top-level files/directories: ${topFiles.join(', ')}
+
+# CONVERSATION
+Respond naturally to greetings, questions, and ordinary conversation in the user's language. Tools are optional: use them only when the user's request needs local workspace information or actions. Do not turn a simple chat message into a coding task. Never claim you cannot access the workspace when local tools have been supplied. Never claim a successful action without a successful tool result. Explain failures briefly and use tool feedback to correct arguments.
 
 # CORE DIRECTIVES & BEHAVIOR
 1. BE ACCURATE AND CONCISE: Get straight to the point. Provide clear, direct answers without unnecessary fluff or excessive commentary.

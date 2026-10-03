@@ -55,8 +55,11 @@ Backed directly by the **`poli-proxy` router** (`https://router.poliai.qzz.io/v1
   - Live animated spinners with elapsed time counter (`[2.4s]`).
   - Markdown syntax highlighting for code blocks in terminal.
   - Live token metrics counter in prompt.
+  - Responsive mint-accented UI with terminal-cell-aware layout for Unicode and narrow windows.
+  - Scrollable command palette, paste support, and horizontal input scrolling.
+  - Blockwise Markdown streaming that preserves terminal scrollback.
 - **🔄 Multi-Model Switching**:
-  - Seamlessly switch between models via `poli models <name>` or `/model <name>`.
+  - Type `/models` to open a searchable picker. Use arrow keys and Enter to switch immediately, with conversation history retained. `poli models` opens the same picker outside a session.
 - **🔒 Private Providers**:
   - All internal upstream provider IDs and names are kept 100% private.
 - **🔌 Powered by `router.poliai.qzz.io`**:
@@ -112,8 +115,9 @@ Inside the interactive `poli` session:
 | Command | Arguments | Description |
 |---|---|---|
 | **`/`** or **`/help`** | | Display the interactive Codex-style Command Palette |
-| **`/model`** | `[name]` | View active model or switch to a new model |
-| **`/models`** | | Browse all available frontier models from router |
+| **`/models`** | | Search and select an available model with arrows and Enter |
+| **`/mode`** | | Choose Agent or Chat mode |
+| **`/retry`** | | Retry a failed request or continue a stopped task |
 | **`/tools`** | | List all active agent tools and parameters |
 | **`/diff`** | | Display uncommitted git diff in the workspace |
 | **`/run`** | `<cmd>` | Execute a shell command directly without LLM turn |
@@ -124,6 +128,64 @@ Inside the interactive `poli` session:
 | **`/clear`** | | Clear conversation context and start fresh |
 | **`/config`** | `[get\|set]` | View or modify local CLI configuration |
 | **`/exit`** or **`/quit`** | | Exit the Poli CLI |
+
+---
+
+## Preview the UI locally
+
+No API key or router connection is needed:
+
+```bash
+npm run ui:preview
+```
+
+The preview shows the welcome screen, conversation, tool result, and code block.
+In a terminal, try `/`, arrow keys, Tab, or pasting text. Enter closes the preview.
+Use `NO_COLOR=1` for plain output.
+
+Input shortcuts: Home / Ctrl+A, End / Ctrl+E, Ctrl+U to clear before the cursor,
+and Ctrl+K to clear after it. Ctrl+C clears the draft; on an empty draft it exits.
+Multiline paste is combined into one task. Enter on a command with required arguments
+fills the command first. `/models` opens the model picker without typing a model name.
+
+### Conversation and agent execution
+
+Agent mode supports ordinary conversation and optional workspace tools. For models
+without native function calling, poli uses dedicated `poli-tool` JSON blocks to request
+local tools; these requests are validated and use the same approval flow. Native tool
+models use the router's function-calling protocol. The picker describes both modes.
+Availability and tool reliability still depend on the upstream model.
+
+Use `/mode` to choose Chat for conversation without tools, or start with `poli --chat`.
+The agent has no fixed step limit. Ctrl+C / Esc stops a running request or shell command
+and returns to the prompt; `/retry` continues afterwards. While poli works, the composer
+stays available directly below the chat: type a follow-up and press Enter to queue
+it. Queued messages are processed after the current response or tool batch completes.
+Unsent drafts and submitted messages survive cancellation. The composer pauses for
+explicit tool approvals. Shell output appears as complete lines. Chat, tool results, and
+code blocks have no decorative frames. The working indicator is a small animated dot.
+Output uses normal terminal scrollback; use your terminal’s scrollbar, mouse wheel, or
+Shift+PageUp / Shift+PageDown to browse earlier messages.
+The shell-style welcome screen keeps workspace, model, git branch, and approval mode together. User messages
+appear once with a `>` prompt; assistant replies start with `poli:`. Tool results use compact action summaries
+(for example, `• Explored` followed by `└ Read src/app.js`), with extra detail for failures. The model
+picker marks the active choice with a check. Input shortcuts appear beside a draft
+when the terminal has enough room.
+The chat keeps one blank line between messages. Model and mode stay in the welcome
+screen; `/status` and `/tokens` show details on demand. Message text is green. The input stays separate from the animated action status,
+with a reply indicator during chat and an action label during tool execution. The input uses a thin cursor, restored
+to the terminal default when poli releases the keyboard.
+CLI labels and status messages are in English (`Replying…`, `Preparing action…`).
+Activity rows use compact `[ok]`, `[err]`, and `[skip]` tags with indented results. File changes include numbered
+red/green previews. Commands show a short output preview after completion; Ctrl+T or
+`/details` shows the latest completed tool result without submitting it to the model.
+Ctrl+T preserves the current draft, both during work and at the idle prompt.
+Chat mode uses conversational welcome and input hints. While typing a long follow-up,
+the activity indicator contracts to a dot to leave more room for the message.
+Without an interactive terminal, changes requiring approval are declined unless `-y`
+is supplied. Requests time out after 120 seconds by default; configure
+`requestTimeoutMs` if your model needs more time. Shell commands default to 120 seconds;
+a tool may request `timeout_seconds: 0` for no command timeout.
 
 ---
 

@@ -1,80 +1,88 @@
-import { colors, style, box } from './theme.js';
+import { colors, style, section, messageText, plainText, terminalWidth, wrapText } from './theme.js';
 import { marked } from 'marked';
-import { highlight } from 'cli-highlight';
+import { highlight, supportsLanguage } from 'cli-highlight';
 
+// marked 12 uses positional renderer arguments.
 const renderer = new marked.Renderer();
-
-renderer.code = function(code, lang) {
-  let highlighted;
-  try {
-    highlighted = highlight(code.text || code, { language: lang || 'txt', ignoreIllegals: true });
-  } catch {
-    highlighted = code.text || code;
+function decodeEntities(text) {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (raw, value) => {
+    if (value[0] === '#') {
+      const point = value[1].toLowerCase() === 'x' ? parseInt(value.slice(2), 16) : parseInt(value.slice(1), 10);
+      return point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : raw;
+    }
+    return { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[value.toLowerCase()] || raw;
+  });
+}
+renderer.text = text => decodeEntities(text);
+renderer.code = (code, language = '') => {
+  let formatted = code;
+  const syntax = language.split(/\s/)[0];
+  if (colors.reset && syntax && supportsLanguage(syntax)) {
+    try { formatted = highlight(code, { language: syntax, ignoreIllegals: true }); } catch {}
   }
-  
-  const title = lang ? ` ${lang} ` : ' code ';
-  const width = Math.min(process.stdout.columns || 80, 80);
-  const border = colors.dim + '─'.repeat(Math.max(2, width - title.length - 10)) + colors.reset;
-  
-  const lines = highlighted.split('\n');
-  const framed = lines.map(l => `${colors.dim}│${colors.reset} ${l}`).join('\n');
-  
-  return `\n${colors.dim}╭──${colors.reset}${colors.bold}${colors.cyan}${title}${colors.reset}${border}\n${framed}\n${colors.dim}╰${'─'.repeat(width - 2)}${colors.reset}\n`;
+  return '\n' + style.dim(language || 'code') + '\n' + wrapText(formatted, Math.max(1, terminalWidth() - 2)).map(line => '  ' + line).join('\n') + '\n\n';
 };
-
-renderer.blockquote = function(quote) {
-  return (quote.text || quote).trim().split('\n').map(l => `${colors.magenta}│${colors.reset} ${colors.italic}${colors.dim}${l}${colors.reset}`).join('\n') + '\n';
+renderer.heading = (text, level) => `\n${style.bold(level < 3 ? style.brightCyan(text) : text)}\n\n`;
+renderer.paragraph = text => text + '\n\n';
+renderer.strong = text => style.bold(text);
+renderer.em = text => style.italic(text);
+renderer.codespan = text => style.yellow(text);
+renderer.del = text => style.dim(text);
+renderer.link = (href, title, text) => `${style.underline(text)}${href === text ? '' : style.dim(' (' + href + ')')}`;
+renderer.image = (href, title, text) => `[${text || 'image'}] (${href})`;
+renderer.br = () => '\n';
+renderer.html = html => html.replace(/<[^>]*>/g, '');
+renderer.hr = () => '\n';
+renderer.blockquote = quote => quote.trim().split('\n').map(line => `${style.dim('>')} ${line}`).join('\n') + '\n\n';
+renderer.list = (body, ordered, start = 1) => {
+  let index = start;
+  return body.split('\u0000').filter(Boolean).map(item => {
+    const prefix = ordered ? `${index++}. ` : '• ';
+    const lines = item.trim().split('\n');
+    return '  ' + style.cyan(prefix) + lines.join('\n    ') + '\n';
+  }).join('') + '\n';
 };
-
-renderer.html = function(html) { return html.text || html; };
-
-renderer.heading = function(heading) {
-  const text = heading.text || heading;
-  const level = heading.depth || 1;
-  const prefix = '#'.repeat(level);
-  let color = colors.brightCyan;
-  if (level === 2) color = colors.cyan;
-  if (level >= 3) color = colors.blue;
-  
-  return `\n${colors.bold}${color}${text}${colors.reset}\n`;
-};
-
-renderer.hr = function() {
-  const width = Math.min(process.stdout.columns || 80, 80);
-  return `\n${colors.dim}${'─'.repeat(width)}${colors.reset}\n`;
-};
-
-renderer.list = function(list) {
-  return (list.body || list) + '\n';
-};
-
-renderer.listitem = function(item) {
-  const text = (item.text || item).trim();
-  // We can't know if it's ordered easily without context in older marked, but let's assume bullet
-  return `  ${colors.cyan}•${colors.reset} ${text}\n`;
-};
-
-renderer.paragraph = function(p) {
-  return (p.text || p) + '\n';
-};
-
-renderer.table = function(table) {
-  return (table.header || table) + '\n' + (table.body || '') + '\n';
-};
-
-renderer.strong = function(strong) { return `${colors.bold}${strong.text || strong}${colors.reset}`; };
-renderer.em = function(em) { return `${colors.italic}${em.text || em}${colors.reset}`; };
-renderer.codespan = function(codespan) { return `${colors.yellow}${codespan.text || codespan}${colors.reset}`; };
-renderer.del = function(del) { return `${colors.dim}${del.text || del}${colors.reset}`; };
-renderer.link = function(link) { return `${colors.underline}${colors.blue}${link.text || link.href}${colors.reset}`; };
-
-marked.setOptions({ renderer });
+renderer.listitem = text => text + '\u0000';
+renderer.table = (header, body) => header + body + '\n';
+renderer.tablerow = content => content + '\n';
+renderer.tablecell = (content, { header }) => (header ? style.bold(content) : content) + '    ';
 
 export function renderMarkdown(markdown = '') {
   if (!markdown) return '';
+  markdown = plainText(markdown);
   try {
-    return marked.parse(markdown).trim();
-  } catch (err) {
-    return markdown;
+    const rendered = marked.parse(markdown, { renderer });
+    return messageText(wrapText(rendered.trim(), terminalWidth()).join('\n'));
+  } catch { return markdown; }
+}
+
+// Flush complete blocks during streaming. Never erase or duplicate scrollback.
+export class MarkdownStream {
+  constructor(write = text => process.stdout.write(text), { transform = text => text } = {}) {
+    this.write = write;
+    this.transform = transform;
+    this.pending = '';
+    this.block = '';
+    this.fence = null;
   }
+  push(text) {
+    this.pending += text;
+    let end;
+    while ((end = this.pending.indexOf('\n')) >= 0) {
+      const line = this.pending.slice(0, end + 1);
+      this.pending = this.pending.slice(end + 1);
+      this.block += line;
+      const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/);
+      if (marker) {
+        if (!this.fence) this.fence = marker[1];
+        else if (marker[1][0] === this.fence[0] && marker[1].length >= this.fence.length) { this.fence = null; this.flush(); }
+      } else if (!this.fence && !line.trim()) this.flush();
+    }
+  }
+  flush() {
+    const visible = this.transform(this.block);
+    if (visible.trim()) this.write(renderMarkdown(visible) + '\n\n');
+    this.block = '';
+  }
+  end() { this.block += this.pending; this.pending = ''; this.flush(); }
 }

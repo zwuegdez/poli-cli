@@ -1,168 +1,121 @@
-// Poli-proxy client for OpenAI-compatible chat completions and streaming
-import { colors } from './ui/theme.js';
+// OpenAI-compatible transport. Handles SSE, JSON-only routers, and cancellation.
+export class ApiError extends Error {
+  constructor(message, status = 0, code = '') { super(message); this.name = 'ApiError'; this.status = status; this.code = code; }
+}
+
+function requestScope(signal, timeoutMs) {
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal.reason);
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error('Request timed out. Try again or choose another model with /models.')), timeoutMs);
+  timer.unref?.();
+  return { signal: controller.signal, close() { clearTimeout(timer); signal?.removeEventListener('abort', abort); } };
+}
+
+function resultFromJson(data) {
+  if (data.error) throw new ApiError(data.error.message || String(data.error), 0, data.error.code);
+  const choice = data.choices?.[0];
+  if (!choice?.message) throw new ApiError('The router returned no assistant message. Try /models or /retry.');
+  return { message: choice.message, usage: data.usage || null, finishReason: choice.finish_reason, meta: data.poliai || null };
+}
 
 export class PoliClient {
-  constructor({ baseUrl, apiKey }) {
-    this.baseUrl = (baseUrl || 'http://127.0.0.1:8000/v1').replace(/\/+$/, '');
+  constructor({ baseUrl, apiKey, timeoutMs = 120000 }) {
+    this.baseUrl = (baseUrl || 'https://router.poliai.qzz.io/v1').replace(/\/+$/, '');
     this.apiKey = apiKey;
+    this.timeoutMs = timeoutMs;
+    this.modelFailures = new Map();
   }
 
-  async listModels() {
-    const url = `${this.baseUrl}/models`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Accept': 'application/json'
-      }
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      throw new Error(`Failed to list models (HTTP ${res.status}): ${errText}`);
+  async request(path, options, scope) {
+    const response = await fetch(`${this.baseUrl}${path}`, { ...options, signal: scope.signal,
+      headers: { Authorization: `Bearer ${this.apiKey}`, ...options.headers } });
+    if (!response.ok) {
+      const raw = await response.text();
+      let detail;
+      try { detail = JSON.parse(raw).error; } catch {}
+      throw new ApiError(detail?.message || `Router request failed (HTTP ${response.status}). ${raw.slice(0, 300)}`, response.status, detail?.code || '');
     }
-
-    const data = await res.json();
-    return Array.isArray(data.data) ? data.data : [];
+    return response;
   }
 
-  async createChatCompletion({
-    model,
-    messages,
-    tools = null,
-    temperature = 0.2,
-    maxTokens = 4096,
-    stream = false,
-    onChunk = null
-  }) {
-    const url = `${this.baseUrl}/chat/completions`;
-    const body = {
-      model,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-      stream: Boolean(stream)
-    };
-
-    if (tools && tools.length > 0) {
-      body.tools = tools;
-      body.tool_choice = 'auto';
-    }
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        'Accept': stream ? 'text/event-stream' : 'application/json'
-      },
-      body: JSON.stringify(body)
-    });
-
-    if (!res.ok) {
-      let errBody = '';
-      try {
-        const json = await res.json();
-        errBody = json.error?.message || JSON.stringify(json);
-      } catch {
-        errBody = await res.text().catch(() => `HTTP ${res.status}`);
-      }
-      throw new Error(`Proxy error (${res.status}): ${errBody}`);
-    }
-
-    if (!stream) {
+  async listModels({ signal } = {}) {
+    const scope = requestScope(signal, 15000);
+    try {
+      const res = await this.request('/models', { method: 'GET', headers: { Accept: 'application/json' } }, scope);
       const data = await res.json();
-      return {
-        message: data.choices?.[0]?.message || { role: 'assistant', content: '' },
-        usage: data.usage || null,
-        meta: data.poliai || null
-      };
-    }
+      return (Array.isArray(data) ? data : Array.isArray(data.data) ? data.data : []).filter(m => typeof m?.id === 'string');
+    } catch (error) { if (scope.signal.aborted) throw scope.signal.reason; throw error; }
+    finally { scope.close(); }
+  }
 
-    // Handle Server-Sent Events (SSE) streaming
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let accumulatedContent = '';
-    const toolCallsMap = new Map();
-    let usage = null;
-    let finishReason = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) continue;
-
-        if (trimmed === 'data: [DONE]') {
-          continue;
-        }
-
-        if (trimmed.startsWith('data: ')) {
-          const jsonStr = trimmed.slice(6).trim();
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const choice = parsed.choices?.[0];
-            if (choice?.finish_reason) {
-              finishReason = choice.finish_reason;
-            }
-            if (parsed.usage) {
-              usage = parsed.usage;
-            }
-
-            const delta = choice?.delta;
-            if (delta) {
-              // Text chunk
-              if (delta.content) {
-                accumulatedContent += delta.content;
-                if (onChunk) onChunk({ type: 'content', text: delta.content });
-              }
-
-              // Tool calls chunk
-              if (Array.isArray(delta.tool_calls)) {
-                for (const tc of delta.tool_calls) {
-                  const idx = tc.index ?? 0;
-                  if (!toolCallsMap.has(idx)) {
-                    toolCallsMap.set(idx, {
-                      id: tc.id || `call_${idx}`,
-                      type: 'function',
-                      function: {
-                        name: tc.function?.name || '',
-                        arguments: tc.function?.arguments || ''
-                      }
-                    });
-                  } else {
-                    const existing = toolCallsMap.get(idx);
-                    if (tc.id) existing.id = tc.id;
-                    if (tc.function?.name) existing.function.name += tc.function.name;
-                    if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            // ignore partial JSON parse error
-          }
-        }
+  async createChatCompletion({ model, messages, tools = null, temperature = 0.2, maxTokens = 4096, stream = false, onChunk = null, signal }) {
+    const scope = requestScope(signal, this.timeoutMs);
+    const body = { model, messages, max_tokens: maxTokens, stream: Boolean(stream) };
+    if (temperature != null) body.temperature = temperature;
+    if (tools?.length) { body.tools = tools; body.tool_choice = 'auto'; }
+    let reader;
+    try {
+      const res = await this.request('/chat/completions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: stream ? 'text/event-stream' : 'application/json' }, body: JSON.stringify(body),
+      }, scope);
+      if (!stream || res.headers.get('content-type')?.includes('application/json')) {
+        const result = resultFromJson(await res.json());
+        if (stream && result.message.content) onChunk?.({ type: 'content', text: result.message.content });
+        this.modelFailures.delete(model);
+        return result;
       }
+      if (!res.body) throw new ApiError('The router returned an empty response body.');
+      reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '', content = '', usage = null, finishReason = null, ended = false, received = false;
+      const calls = new Map();
+      const handleLine = line => {
+        if (!line.startsWith('data:')) return;
+        const raw = line.slice(5).trim();
+        if (!raw) return;
+        if (raw === '[DONE]') { ended = true; return; }
+        let data;
+        try { data = JSON.parse(raw); } catch { throw new ApiError('The router sent an invalid streaming event. Try /retry.'); }
+        if (data.error) throw new ApiError(data.error.message || 'Router streaming error', 0, data.error.code);
+        if (data.usage) usage = data.usage;
+        const choice = data.choices?.[0];
+        if (!choice) return;
+        received = true;
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+        const delta = choice.delta || choice.message || {};
+        if (typeof delta.content === 'string' && delta.content) { content += delta.content; onChunk?.({ type: 'content', text: delta.content }); }
+        const reasoning = delta.reasoning_content || delta.reasoning;
+        if (reasoning) onChunk?.({ type: 'reasoning', text: reasoning });
+        for (const part of delta.tool_calls || []) {
+          const index = part.index ?? 0;
+          if (!calls.has(index)) calls.set(index, { id: part.id || `call_${index}`, type: 'function', function: { name: '', arguments: '' } });
+          const call = calls.get(index);
+          if (part.id) call.id = part.id;
+          if (part.function?.name) call.function.name += part.function.name;
+          if (part.function?.arguments) call.function.arguments += part.function.arguments;
+          onChunk?.({ type: 'tool', name: call.function.name });
+        }
+      };
+      while (!ended) {
+        const { done, value } = await reader.read();
+        buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        let newline;
+        while (!ended && (newline = buffer.indexOf('\n')) !== -1) { handleLine(buffer.slice(0, newline).replace(/\r$/, '')); buffer = buffer.slice(newline + 1); }
+        if (done) { if (!ended && buffer.trim()) handleLine(buffer.replace(/\r$/, '')); break; }
+      }
+      const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
+      if (!received || !content && !toolCalls.length) throw new ApiError('The model returned no text or tool calls. Choose another model with /models or use /retry.');
+      if (!ended && !finishReason) throw new ApiError('The response stream ended before completion. Use /retry to try again.');
+      if (toolCalls.some(call => !call.function.name)) throw new ApiError('The model returned an incomplete tool call. Use /retry.');
+      this.modelFailures.delete(model);
+      return { message: { role: 'assistant', content: content || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, usage, finishReason };
+    } catch (error) {
+      if (!signal?.aborted) this.modelFailures.set(model, scope.signal.aborted ? scope.signal.reason?.message : error.message);
+      if (scope.signal.aborted) throw scope.signal.reason;
+      throw error;
     }
-
-    const toolCalls = Array.from(toolCallsMap.values()).filter(tc => tc.function.name);
-
-    return {
-      message: {
-        role: 'assistant',
-        content: accumulatedContent || null,
-        tool_calls: toolCalls.length > 0 ? toolCalls : undefined
-      },
-      usage,
-      finishReason
-    };
+    finally { await reader?.cancel().catch(() => {}); reader?.releaseLock(); scope.close(); }
   }
 }

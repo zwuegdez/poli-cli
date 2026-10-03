@@ -1,5 +1,5 @@
 // Enhanced Terminal Spinner with elapsed timer and clean recovery
-import { colors, symbols } from './theme.js';
+import { colors, symbols, truncate, cellWidth } from './theme.js';
 
 export class Spinner {
   constructor(text = '', stream = process.stderr) {
@@ -14,7 +14,9 @@ export class Spinner {
 
   start(text) {
     if (text) this.text = text;
-    if (this.isSpinning || !this.stream.isTTY) return this;
+    if (this.isSpinning) return this;
+    this.startTime = Date.now();
+    if (!this.stream.isTTY) return this;
     this.isSpinning = true;
     this.frameIndex = 0;
     this.startTime = Date.now();
@@ -40,11 +42,14 @@ export class Spinner {
 
   render() {
     if (!this.stream.isTTY) return;
+    if (this.stream.poliTurnInput?.active) {
+      this.stream.poliTurnInput.setActivity(this.text, this.frameIndex, ((Date.now() - this.startTime) / 1000).toFixed(1) + 's');
+      return;
+    }
     const frame = colors.brightCyan + this.frames[this.frameIndex] + colors.reset;
     const elapsed = this.getElapsed();
-    this.stream.cursorTo(0);
-    this.stream.write(`${frame} ${this.text} ${elapsed} `);
-    this.stream.clearLine(1);
+    const label = truncate(this.text, Math.max(1, (this.stream.columns || 80) - cellWidth(elapsed) - 5));
+    this.stream.write(`\r\x1b[2K${frame} ${label} ${elapsed} `);
   }
 
   stop() {
@@ -53,8 +58,8 @@ export class Spinner {
     this.timer = null;
     this.isSpinning = false;
     if (this.stream.isTTY) {
-      this.stream.cursorTo(0);
-      this.stream.clearLine(0);
+      if (this.stream.poliTurnInput?.active) this.stream.poliTurnInput.setActivity('');
+      else this.stream.write('\r\x1b[2K');
     }
     return this;
   }

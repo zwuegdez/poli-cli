@@ -44,6 +44,8 @@ export function loadConfig() {
     accountApiBase: DEFAULT_ACCOUNT_API_BASE,
     model: DEFAULT_MODEL,
     autoApprove: false,
+    mode: 'agent',
+    requestTimeoutMs: 120000,
     temperature: 0.2,
     maxTokens: 4096,
     stream: true

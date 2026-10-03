@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { renderDiff } from '../ui/diff.js';
+import { stripAnsi } from '../ui/theme.js';
 
 export const writeFileDefinition = {
   type: 'function',
@@ -46,12 +47,13 @@ export async function executeWriteFile(args, context = {}) {
     const diff = renderDiff(args.file_path, oldContent, args.content);
     process.stdout.write(`\n${diff}\n\n`);
     const actionDesc = fileExists ? `Overwrite ${args.file_path}?` : `Create ${args.file_path}?`;
-    const confirmed = await promptManager.confirm(actionDesc, true);
+    const confirmed = await promptManager.confirm(actionDesc, true, { signal: context.signal, onCancel: context.cancelTurn });
     if (!confirmed) {
       return { rejected: true, message: `User declined creating/overwriting ${args.file_path}` };
     }
   }
 
+  if (context.signal?.aborted) return { rejected: true, message: 'Turn stopped.' };
   try {
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
@@ -62,6 +64,7 @@ export async function executeWriteFile(args, context = {}) {
       success: true,
       file_path: args.file_path,
       created: !fileExists,
+      ...((autoApprove || !promptManager) ? { diff_preview: stripAnsi(renderDiff(args.file_path, oldContent, args.content)) } : {}),
       bytes_written: Buffer.byteLength(args.content, 'utf8')
     };
   } catch (err) {

@@ -5,7 +5,7 @@ import { cmdLogout } from './commands/logout.js';
 import { cmdStatus } from './commands/status.js';
 import { cmdModels } from './commands/models.js';
 import { cmdConfig } from './commands/config.js';
-import { colors, style } from './ui/theme.js';
+import { colors, style, section } from './ui/theme.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,44 +14,39 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
 
 export function printHelp() {
-  process.stdout.write(`
-${colors.bold}${colors.brightCyan}poli-code${colors.reset} — Agentic AI Coding Assistant CLI powered by ${colors.brightMagenta}poli-proxy${colors.reset}
-Version: ${pkg.version}
-
-${colors.bold}USAGE:${colors.reset}
-  poli [command] [options]
-  poli "your coding task prompt"
-  poli -p "refactor server.js"
-
-${colors.bold}COMMANDS:${colors.reset}
-  ${colors.yellow}(default)${colors.reset}        Launch interactive agentic coding REPL
-  ${colors.yellow}login${colors.reset}            Sign in or set your PoliAI proxy key and inference URL
-  ${colors.yellow}logout${colors.reset}           Clear stored PoliAI credentials
-  ${colors.yellow}status${colors.reset}           Check connection, proxy health, and configuration
-  ${colors.yellow}models${colors.reset} [name]    List models from proxy or switch active model
-  ${colors.yellow}config${colors.reset}           View or modify local configuration settings
-
-${colors.bold}OPTIONS:${colors.reset}
-  ${colors.cyan}-m, --model <name>${colors.reset}       Set model for this session (e.g. gpt-6.1-sol, claude-fable-5-1, grok-4.7)
-  ${colors.cyan}-p, --prompt <text>${colors.reset}      Execute a single instruction and exit
-  ${colors.cyan}-y, --yes${colors.reset}                Auto-approve file changes and shell command executions
-  ${colors.cyan}--base-url <url>${colors.reset}        Set custom proxy base URL
-  ${colors.cyan}-v, --version${colors.reset}            Show version number
-  ${colors.cyan}-h, --help${colors.reset}               Show this help message
-
-${colors.bold}EXAMPLES:${colors.reset}
-  poli                                     Start interactive session
-  poli "find and fix memory leaks in src"  Autonomous coding task
-  poli -m grok-4.7                         Start session with Grok model
-  poli models                              List all available models on proxy
-  poli status                              Verify proxy health and API keys
-`);
+  const content = [
+    'Your coding assistant, right in the terminal.',
+    '',
+    `${style.bold('Start')}        poli`,
+    `${style.bold('Ask')}          poli "fix the failing tests"`,
+    '',
+    style.bold('Commands'),
+    'login         Sign in or configure an API key',
+    'logout        Clear stored credentials',
+    'models [name] Browse models or choose a default',
+    'status        Check your connection',
+    'config        View or update settings',
+    '',
+    style.bold('Options'),
+    '-m, --model <name>  Choose a model for this session',
+    '-p, --prompt <text> Run one task and exit',
+    '--chat              Chat without workspace tools',
+    '--agent             Use workspace tools (default)',
+    '-y, --yes           Automatically approve actions',
+    '--base-url <url>    Use a custom endpoint',
+    '-v, --version       Show version',
+    '-h, --help          Show help',
+    '',
+    style.dim('Inside a session: / commands · ↑↓ history · Tab complete'),
+  ].join('\n');
+  process.stdout.write('\n' + section(`poli / v${pkg.version}`, content) + '\n\n');
 }
 
 export function parseArgs(argv) {
   const args = argv.slice(2);
   const flags = {
     model: null,
+    mode: null,
     prompt: null,
     baseUrl: null,
     yes: false,
@@ -69,6 +64,8 @@ export function parseArgs(argv) {
       flags.version = true;
     } else if (a === '-y' || a === '--yes') {
       flags.yes = true;
+    } else if (a === '--chat' || a === '--agent') {
+      flags.mode = a.slice(2);
     } else if (a === '-m' || a === '--model') {
       flags.model = args[++i];
     } else if (a.startsWith('--model=')) {
@@ -104,7 +101,7 @@ export async function runCli(argv = process.argv) {
   const { flags, positional } = parsed;
 
   if (flags.version) {
-    process.stdout.write(`poli-code v${pkg.version}\n`);
+    process.stdout.write(`poli v${pkg.version}\n`);
     return 0;
   }
 
@@ -134,6 +131,7 @@ export async function runCli(argv = process.argv) {
       const prompt = flags.prompt || (positional.length > 0 ? positional.join(' ') : null);
       return await cmdChat(prompt, {
         model: flags.model,
+        mode: flags.mode,
         baseUrl: flags.baseUrl,
         yes: flags.yes
       });

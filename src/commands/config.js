@@ -1,6 +1,6 @@
 // Command: poli config
 import { loadConfig, saveConfig, getConfigPath } from '../config.js';
-import { colors, box } from '../ui/theme.js';
+import { colors } from '../ui/theme.js';
 
 export function cmdConfig(subcommand, key, value) {
   const current = loadConfig();

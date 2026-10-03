@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { renderDiff } from '../ui/diff.js';
+import { stripAnsi } from '../ui/theme.js';
 
 export const editFileDefinition = {
   type: 'function',
@@ -74,17 +75,19 @@ export async function executeEditFile(args, context = {}) {
   if (!autoApprove && promptManager) {
     const diff = renderDiff(args.file_path, original, newContent);
     process.stdout.write(`\n${diff}\n\n`);
-    const confirmed = await promptManager.confirm(`Apply changes to ${args.file_path}?`, true);
+    const confirmed = await promptManager.confirm(`Apply changes to ${args.file_path}?`, true, { signal: context.signal, onCancel: context.cancelTurn });
     if (!confirmed) {
       return { rejected: true, message: `User rejected edits to ${args.file_path}` };
     }
   }
 
+  if (context.signal?.aborted) return { rejected: true, message: 'Turn stopped.' };
   try {
     fs.writeFileSync(filePath, newContent, 'utf8');
     return {
       success: true,
       file_path: args.file_path,
+      ...((autoApprove || !promptManager) ? { diff_preview: stripAnsi(renderDiff(args.file_path, original, newContent)) } : {}),
       replacements_made: allow_multiple ? count : 1
     };
   } catch (err) {

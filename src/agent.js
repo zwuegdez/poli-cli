@@ -1,169 +1,206 @@
-// Agentic loop orchestrator
-import { ALL_TOOLS, executeTool } from './tools/index.js';
+import { ALL_TOOLS, executeTool, normalizeToolCall } from './tools/index.js';
 import { Spinner } from './ui/spinner.js';
-import { colors, style, symbols, toolCard } from './ui/theme.js';
-import { renderMarkdown } from './ui/markdown.js';
+import { toolDetails } from './ui/tool-details.js';
+import { toolCard, toolActivity, chatMessage, style } from './ui/theme.js';
+import { MarkdownStream } from './ui/markdown.js';
+import { watchCancellation } from './ui/select.js';
+import { TurnInput } from './ui/turn-input.js';
+import { parseBridgeCalls, chatMessages } from './tool-bridge.js';
 
 export class PoliAgent {
-  constructor({ client, session, config, promptManager }) {
-    this.client = client;
-    this.session = session;
-    this.config = config;
-    this.promptManager = promptManager;
-    this.maxSteps = 25; // Prevent runaway loops
+  constructor({ client, session, config, promptManager, execute = executeTool, createTurnInput = options => new TurnInput(options) }) {
+    Object.assign(this, { client, session, config, promptManager, execute, createTurnInput });
+    this.modelInfo = null;
+    this.bridgeModels = new Set();
+    this.lastTurnFailed = false;
   }
 
-  async runTurn(userInput) {
-    if (userInput) {
-      this.session.addMessage({ role: 'user', content: userInput });
+  setModel(model) { this.modelInfo = model; }
+
+  async runTurn(userInput, { signal } = {}) {
+    if (userInput) this.session.addMessage({ role: 'user', content: userInput });
+    if (!this.session.messages.some(m => m.role === 'user')) {
+      console.log(style.dim('\nSend a task first.')); return {};
     }
-
-    let step = 0;
-    const spinner = new Spinner();
-
-    while (step < this.maxSteps) {
-      step++;
-      let streamedAssistantText = '';
-      let isFirstChunk = true;
-      let streamedRawLines = 0;
-
-      // Call LLM via Router
-      spinner.start(`Thinking (${this.config.model})...`);
-
-      let response;
-      try {
-        response = await this.client.createChatCompletion({
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    if (signal?.aborted) cancel();
+    signal?.addEventListener('abort', cancel, { once: true });
+    process.on('SIGINT', cancel);
+    const started = Date.now();
+    let actions = 0, formatRepaired = false;
+    const spinner = new Spinner('', process.stdout);
+    this.lastTurnFailed = false;
+    const turnInput = this.createTurnInput({ controller, onDetails: () => process.stdout.write('\n' + toolDetails(this.session.messages) + '\n\n'), onSubmit: message => this.promptManager?.saveHistory(message) });
+    turnInput.start();
+    const watch = () => turnInput.active ? () => {} : watchCancellation(controller);
+    const appendQueued = () => {
+      const messages = turnInput.drain();
+      for (const content of messages) {
+        this.session.addMessage({ role: 'user', content });
+        process.stdout.write(chatMessage('user', content, { queued: true }) + '\n');
+      }
+      return messages.length;
+    };
+    let activeToolSpinner;
+    const toolsPrompt = this.promptManager ? Object.create(this.promptManager) : null;
+    if (toolsPrompt) toolsPrompt.confirm = async (...args) => {
+      activeToolSpinner?.stop();
+      turnInput.suspend();
+      try { return await this.promptManager.confirm(...args); }
+      finally { if (!controller.signal.aborted) { turnInput.start(); activeToolSpinner?.start(); } }
+    };
+    if (this.modelInfo?.id !== this.config.model && typeof this.client.listModels === 'function') {
+      spinner.start('Connecting…');
+      const stopWatching = watch();
+      try { this.modelInfo = (await this.client.listModels({ signal: controller.signal })).find(m => m.id === this.config.model) || null; }
+      catch { /* Requests still work when a router does not expose a catalog. */ }
+      finally { stopWatching(); spinner.stop(); }
+    }
+    try {
+      // Continue until the model finishes or the user stops the turn. No step cap.
+      while (!controller.signal.aborted) {
+        const agentMode = this.config.mode !== 'chat';
+        let bridge = agentMode && (this.modelInfo?.capabilities?.tools === false || this.bridgeModels.has(this.config.model));
+        let streamed = '', first = true;
+        const output = new MarkdownStream(text => process.stdout.write(text), {
+          transform: text => bridge ? parseBridgeCalls(text).content : text,
+        });
+        const beginResponse = () => {
+          if (!first) return;
+          first = false;
+          if (turnInput.active) spinner.update('Replying…');
+          else spinner.stop();
+          process.stdout.write('\n' + style.bold('poli:') + '\n');
+        };
+        const chunks = chunk => {
+          if (chunk.type === 'content') {
+            streamed += chunk.text;
+            beginResponse();
+            output.push(chunk.text);
+          } else if (first && chunk.type === 'reasoning') spinner.update('Preparing reply…');
+          else if (first && chunk.type === 'tool') spinner.update('Preparing action…');
+        };
+        const request = () => this.client.createChatCompletion({
           model: this.config.model,
-          messages: this.session.messages,
-          tools: ALL_TOOLS,
+          messages: bridge || !agentMode ? chatMessages(this.session.messages, bridge, { workspaceDir: this.session.workspaceDir }) : this.session.messages,
+          tools: agentMode && !bridge ? ALL_TOOLS : null,
           temperature: this.config.temperature,
           maxTokens: this.config.maxTokens,
-          stream: true,
-          onChunk: (chunk) => {
-            if (chunk.type === 'content') {
-              if (isFirstChunk) {
-                spinner.stop();
-                isFirstChunk = false;
-              }
-              process.stdout.write(chunk.text);
-              streamedAssistantText += chunk.text;
-              if (chunk.text.includes('\n')) {
-                streamedRawLines += (chunk.text.match(/\n/g) || []).length;
-              }
-            }
-          }
+          stream: this.modelInfo?.capabilities?.streaming !== false,
+          onChunk: chunks,
+          signal: controller.signal,
         });
-      } catch (err) {
-        spinner.fail(`Router request failed: ${err.message}`);
-        return { error: err.message };
-      }
-
-      spinner.stop();
-      if (streamedAssistantText) {
-        // Clear raw stream output if it fits, else just append
-        const terminalHeight = process.stdout.rows || 24;
-        const totalLines = streamedRawLines + (streamedAssistantText.length / 80);
-        if (totalLines < terminalHeight - 3) {
-          // erase up the number of lines
-          // wait, erase up is tricky if line wrap happened. Let's just print the markdown directly!
-          // Actually, it's safer to just print a small separator
-        }
-        
-        // We will just clear line by line for streamedRawLines (rough approx)
-        if (totalLines < terminalHeight - 3) {
-          process.stdout.write(`\x1b[${Math.floor(totalLines)}A\x1b[0J`);
-        } else {
-          process.stdout.write('\n\n'); // Fallback separator
-        }
-
-        const formatted = renderMarkdown(streamedAssistantText);
-        const boxLines = [
-          `\n${colors.dim}╭─ ${colors.bold}${colors.brightCyan}✦ poli-code${colors.reset} ${colors.dim}(${this.config.model}) ${'─'.repeat(Math.max(2, 50))}╮${colors.reset}`,
-          ...formatted.split('\n').map(l => `${colors.dim}│${colors.reset} ${l}`),
-          `${colors.dim}╰${'─'.repeat(Math.max(2, 70))}╯${colors.reset}\n`
-        ];
-        process.stdout.write(boxLines.join('\n') + '\n');
-      }
-
-      const { message, usage } = response;
-      if (usage) {
-        this.session.recordUsage(usage);
-      }
-
-      // Check if model called tools
-      const toolCalls = message?.tool_calls;
-      if (!toolCalls || toolCalls.length === 0) {
-        // No tool calls - turn finished!
-        this.session.addMessage({
-          role: 'assistant',
-          content: message.content || streamedAssistantText || ''
-        });
-        this.session.save();
-        break;
-      }
-
-      // Record assistant message with tool calls
-      this.session.addMessage({
-        role: 'assistant',
-        content: message.content || (streamedAssistantText ? streamedAssistantText : null),
-        tool_calls: toolCalls
-      });
-
-      // Execute each tool call
-      for (const tc of toolCalls) {
-        const fnName = tc.function?.name;
-        let fnArgs = {};
+        spinner.start('Replying…');
+        let response;
+        const stopWatching = watch();
         try {
-          fnArgs = JSON.parse(tc.function?.arguments || '{}');
-        } catch {
-          fnArgs = { raw: tc.function?.arguments };
+          try { response = await request(); }
+          catch (error) {
+            // Retry only an explicit unsupported-tools rejection, before any text.
+            if (!streamed && agentMode && !bridge && (error.code === 'model_does_not_support_tools' || error.status === 400 && /(?:tools?|function.call).*(?:not support|unsupported)|(?:not support|unsupported).*tools?/i.test(error.message))) {
+              bridge = true;
+              this.bridgeModels.add(this.config.model);
+              spinner.update('Using local tool bridge · Ctrl+C / Esc stop');
+              response = await request();
+            } else if (!streamed && (error.code === 'context_length_exceeded' || error.status === 400 && /context.{0,30}(?:length|limit|exceed|too long)/i.test(error.message)) && this.session.compact?.()) {
+              spinner.update('Trimming older conversation · Ctrl+C / Esc stop');
+              response = await request();
+            } else throw error;
+          }
+        } catch (error) {
+          output.end();
+          if (streamed) this.session.addMessage({ role: 'assistant', content: streamed });
+          throw error;
+        } finally { stopWatching(); spinner.stop(); }
+        if (!streamed && response.message?.content) { beginResponse(); output.push(response.message.content); }
+        output.end();
+        if (response.usage) this.session.recordUsage(response.usage);
+        const message = response.message || {};
+        let content = message.content || streamed || '';
+        let calls = message.tool_calls || [];
+        if (bridge) {
+          const parsed = parseBridgeCalls(content);
+          content = parsed.content;
+          calls = [...calls, ...parsed.calls];
         }
-
-        const toolStart = Date.now();
-        const toolSpinner = new Spinner(`Executing ${fnName}...`).start();
-
-        const toolContext = {
-          workspaceDir: this.session.workspaceDir,
-          promptManager: this.promptManager,
-          autoApprove: this.config.autoApprove
-        };
-
-        const result = await executeTool(fnName, fnArgs, toolContext);
-        const elapsed = Date.now() - toolStart;
-
-        if (result?.error) {
-          toolSpinner.fail(`${fnName} error: ${result.error}`);
-        } else if (result?.rejected) {
-          toolSpinner.info(`${fnName} cancelled by user`);
-        } else {
-          toolSpinner.succeed(`${fnName} completed (${elapsed}ms)`);
+        if (!agentMode) calls = [];
+        if (bridge && !calls.length && !formatRepaired && /tool\s*call\s*:\s*(?:view_file|list_dir|run_command|edit_file|write_file|grep_search|file_search)\b|(?:can't|cannot|don't|do not|no).{0,50}(?:access.{0,30}(?:file|tool|workspace)|read.{0,20}(?:local|file))|(?:cannot|can't|don't|do not).{0,30}(?:read|edit|execute|run).{0,25}(?:files?|commands?)/i.test(content)) {
+          formatRepaired = true;
+          this.session.addMessage({ role: 'assistant', content });
+          this.session.addMessage({ role: 'user', content: 'Local tool protocol error: your attempted tool call was NOT executed because it used the wrong format. Emit a dedicated ```poli-tool fenced block containing {"name":"tool_name","arguments":{...}} with the exact schema parameter names from the system instructions. Then wait for the tool result. Do not ask the user to execute it.' });
+          continue;
         }
-
-        // Output clean tool summary card
-        const card = toolCard({
-          name: fnName,
-          args: fnArgs,
-          status: result?.error ? 'error' : 'success',
-          elapsedMs: elapsed
+        if (!calls.length) {
+          this.session.addMessage({ role: 'assistant', content });
+          if (!content.trim()) {
+            this.lastTurnFailed = true;
+            console.log(style.yellow('No answer returned. Try /retry or choose another model with /models.'));
+          }
+          if (response.finishReason === 'length') console.log(style.dim('Response reached the model output limit. Use /retry to continue.'));
+          if (appendQueued()) continue;
+          break;
+        }
+        calls = calls.map(call => {
+          try {
+            const normalized = normalizeToolCall(call.function?.name, JSON.parse(call.function?.arguments || '{}'));
+            return { ...call, function: { name: normalized.name, arguments: JSON.stringify(normalized.args) } };
+          } catch { return call; }
         });
-        process.stdout.write(`\n${card}\n\n`);
+        this.session.addMessage({ role: 'assistant', content: content || null, tool_calls: calls });
+        for (const call of calls) {
+          const name = call.function?.name;
+          let args, result;
+          try { args = JSON.parse(call.function?.arguments || '{}'); }
+          catch { result = { error: 'Invalid JSON tool arguments. Send a valid arguments object.' }; args = {}; }
+          const toolStart = Date.now();
+          const toolSpinner = new Spinner(toolActivity(name, args), process.stdout);
+          activeToolSpinner = toolSpinner;
+          if (controller.signal.aborted) result = { rejected: true, message: 'User stopped the turn. This tool was not executed.' };
+          else if (!result) {
+            toolSpinner.start();
+            try {
+              result = await this.execute(name, args, {
+                workspaceDir: this.session.workspaceDir,
+                promptManager: toolsPrompt,
+                turnInput,
+                autoApprove: this.config.autoApprove,
+                controller,
+                signal: controller.signal,
+                cancelTurn: cancel,
+                onStart: () => toolSpinner.start(toolActivity(name, args)),
 
-        // Add tool result to session messages
-        this.session.addMessage({
-          role: 'tool',
-          tool_call_id: tc.id,
-          name: fnName,
-          content: JSON.stringify(result)
-        });
+              });
+            } catch (error) { result = { error: error.message }; }
+            finally { toolSpinner.stop(); }
+          }
+          actions++;
+          const status = result?.rejected ? 'rejected' : result?.error || result?.exit_code > 0 || result?.timed_out ? 'error' : 'success';
+          process.stdout.write(`\n${toolCard({ name, args, status, result, elapsedMs: Date.now() - toolStart })}\n`);
+          this.session.addMessage({ role: 'tool', tool_call_id: call.id, name, content: JSON.stringify(result ?? { error: 'Tool returned no result.' }) });
+          this.session.save();
+        }
+        appendQueued();
       }
-
-      // Loop continues with tool results fed back to LLM!
+      if (controller.signal.aborted) console.log(style.yellow('\nStopped. Your conversation is kept. Send a new task or use /retry.'));
+      else if (actions) console.log(style.dim(`${actions} ${actions === 1 ? 'tool call' : 'tool calls'} · ${((Date.now() - started) / 1000).toFixed(1)}s`));
+      return { cancelled: controller.signal.aborted };
+    } catch (error) {
+      spinner.stop();
+      this.lastTurnFailed = true;
+      if (controller.signal.aborted) { console.log(style.yellow('\nStopped. Send a new message or use /retry.')); return { cancelled: true }; }
+      console.log(style.red(`\n${error.message}`));
+      console.log(style.dim('Use /retry to try again, /models to change model, or keep chatting.\n'));
+      return { error: error.message };
+    } finally {
+      spinner.stop();
+      // Keep submitted follow-ups even when the active request fails or is stopped.
+      appendQueued();
+      if (this.promptManager) this.promptManager.draft = turnInput.draft();
+      turnInput.close();
+      signal?.removeEventListener('abort', cancel);
+      process.removeListener('SIGINT', cancel);
+      this.session.save();
     }
-
-    if (step >= this.maxSteps) {
-      process.stdout.write(`\n${colors.yellow}⚠️ Step limit reached (${this.maxSteps} steps).${colors.reset}\n`);
-    }
-
-    this.session.save();
   }
 }

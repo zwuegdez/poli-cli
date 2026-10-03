@@ -1,7 +1,7 @@
 // Command: poli status
 import { loadConfig } from '../config.js';
 import { loadCredentials, maskKey, getCredentialsPath } from '../auth.js';
-import { colors, style, box } from '../ui/theme.js';
+import { colors, style, section } from '../ui/theme.js';
 
 export async function cmdStatus() {
   const config = loadConfig();
@@ -36,6 +36,6 @@ export async function cmdStatus() {
     `${colors.dim}Workspace:${colors.reset}          ${colors.gray}${process.cwd()}${colors.reset}`
   ];
 
-  process.stdout.write('\n' + box('System Status', lines.join('\n'), { borderColor: colors.brightCyan }) + '\n\n');
+  process.stdout.write('\n' + section('System Status', lines.join('\n')) + '\n\n');
   return 0;
 }

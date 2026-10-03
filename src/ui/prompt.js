@@ -2,23 +2,32 @@
 import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
-import { colors, style, symbols } from './theme.js';
+import { colors, style, accent, messageText, cellWidth, truncate, terminalWidth } from './theme.js';
 
 export const COMMAND_LIST = [
   { cmd: '/help', args: '', desc: 'Show all available slash commands and shortcuts', category: 'Commands' },
-  { cmd: '/model', args: '[name]', desc: 'View current model or switch to a new model', category: 'Agent & Model' },
-  { cmd: '/models', args: '', desc: 'Browse available frontier models from router', category: 'Agent & Model' },
+  { cmd: '/models', args: '', desc: 'Choose a model with arrows or search', category: 'Agent & Model' },
+  { cmd: '/mode', args: '', desc: 'Choose Agent (workspace tools) or Chat', category: 'Agent & Model' },
+  { cmd: '/retry', args: '', desc: 'Retry or continue the last task', category: 'Session & Memory' },
   { cmd: '/tools', args: '', desc: 'Display all agent tools and capabilities', category: 'Agent & Model' },
+  { cmd: '/details', args: '', desc: 'Show the latest tool result · Ctrl+T', category: 'Agent & Model' },
   { cmd: '/diff', args: '', desc: 'View uncommitted git diff in the workspace', category: 'Workspace & Git' },
   { cmd: '/run', args: '<command>', desc: 'Execute a shell command directly', category: 'Workspace & Git' },
   { cmd: '/status', args: '', desc: 'View router endpoint health and session metrics', category: 'Session & Memory' },
-  { cmd: '/tokens', args: '', desc: 'Show detailed token usage and cost metrics', category: 'Session & Memory' },
+  { cmd: '/tokens', args: '', desc: 'Show prompt, completion, and total token usage', category: 'Session & Memory' },
   { cmd: '/compact', args: '', desc: 'Compress conversation context to preserve tokens', category: 'Session & Memory' },
   { cmd: '/history', args: '', desc: 'Inspect recent conversation turn history', category: 'Session & Memory' },
   { cmd: '/clear', args: '', desc: 'Reset conversation context and start fresh', category: 'Session & Memory' },
   { cmd: '/config', args: '[get|set]', desc: 'View or modify local configuration', category: 'Settings' },
-  { cmd: '/exit', args: '', desc: 'Exit Poli-code', category: 'Exit' }
+  { cmd: '/exit', args: '', desc: 'Exit poli', category: 'Exit' }
 ];
+
+export function matchCommands(text) {
+  if (!/^\/[^\s]*$/.test(text)) return [];
+  const query = text.toLowerCase();
+  return COMMAND_LIST.filter(c => c.cmd.startsWith(query))
+    .sort((a, b) => Number(b.cmd === query) - Number(a.cmd === query));
+}
 
 export class PromptManager {
   constructor(options = {}) {
@@ -42,325 +51,170 @@ export class PromptManager {
   }
 
   saveHistory(line) {
-    if (!line || !this.historyFile) return;
+    if (!line) return;
+    this.history.push(line);
+    this.history = this.history.slice(-200);
+    this.historyIndex = -1;
+    if (!this.historyFile) return;
     try {
       const dir = path.dirname(this.historyFile);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.appendFileSync(this.historyFile, line + '\n', 'utf8');
-      this.history.push(line);
-      this.historyIndex = -1;
+
     } catch {}
   }
 
-  promptUser({ model = 'gpt-6.1-sol', tokens = 0 } = {}) {
+  promptUser({ model = 'gpt-6.1-sol', tokens = 0, mode = 'agent' } = {}) {
     if (!process.stdin.isTTY) {
       return this.promptFallback({ model, tokens });
     }
-    return this.promptRawInteractive({ model, tokens });
+    return this.promptRawInteractive({ model, tokens, mode });
   }
 
-  promptFallback({ model = 'gpt-6.1-sol', tokens = 0 } = {}) {
-    return new Promise((resolve) => {
-      const tokenPill = tokens > 0 ? ` ${colors.dim}(${tokens.toLocaleString()} tok)${colors.reset}` : '';
-      const promptString = `\n${colors.bold}${colors.brightCyan}✦ poli${colors.reset} ${colors.dim}[${colors.green}${model}${colors.dim}]${tokenPill} ${colors.brightCyan}›${colors.reset} `;
-
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        prompt: promptString
-      });
-
-      rl.prompt();
-
-      rl.on('line', (line) => {
-        rl.close();
-        resolve(line.trim());
-      });
-
-      rl.on('SIGINT', () => {
-        rl.close();
-        resolve('/exit');
-      });
-    });
+  promptFallback() {
+    if (!this.fallback) {
+      this.fallback = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+      this.fallbackLines = this.fallback[Symbol.asyncIterator]();
+    }
+    return this.fallbackLines.next().then(({ value, done }) => done ? '/exit' : value.trim());
   }
 
-  promptRawInteractive({ model = 'gpt-6.1-sol', tokens = 0 } = {}) {
+  promptRawInteractive({ model = 'gpt-6.1-sol', tokens = 0, mode = 'agent' } = {}) {
     return new Promise((resolve) => {
-      const stdin = process.stdin;
-      const stdout = process.stdout;
-
+      const stdin = process.stdin, stdout = process.stdout;
+      const previousRaw = stdin.isRaw;
+      readline.emitKeypressEvents(stdin);
       stdin.setRawMode(true);
       stdin.resume();
-      stdin.setEncoding('utf8');
-
-      let buffer = '';
-      let cursorPos = 0;
-      let selectedCommandIndex = 0;
-      let lastRenderedMenuLines = 0;
-
-      const tokenPill = tokens > 0 ? ` ${colors.dim}(${tokens.toLocaleString()} tok)${colors.reset}` : '';
-      const promptPrefix = `\n${colors.bold}${colors.brightCyan}✦ poli${colors.reset} ${colors.dim}[${colors.green}${model}${colors.dim}]${tokenPill} ${colors.brightCyan}›${colors.reset} `;
-
-      stdout.write(promptPrefix);
-
-      const cleanupAndResolve = (result) => {
-        clearMenu();
-        stdin.removeListener('data', onData);
-        stdin.setRawMode(false);
-        stdin.pause();
-        stdout.write('\n');
-        if (result && !result.startsWith('/')) {
-          this.saveHistory(result);
-        }
-        resolve(result);
-      };
-
+      let buffer = Array.from(this.draft || ''), cursor = buffer.length, selected = 0, menuLines = 0, dismissed = false;
+      this.draft = '';
+      let draft = [], pasting = false, paste = '';
+      this.historyIndex = -1;
+      const text = () => buffer.join('');
+      const matches = () => dismissed ? [] : matchCommands(text());
       const clearMenu = () => {
-        if (lastRenderedMenuLines > 0) {
-          for (let i = 0; i < lastRenderedMenuLines; i++) {
-            stdout.write('\x1b[1B\x1b[2K');
-          }
-          stdout.write(`\x1b[${lastRenderedMenuLines}A`);
-          lastRenderedMenuLines = 0;
-        }
+        if (!menuLines) return;
+        readline.cursorTo(stdout, 0);
+        for (let i = 0; i < menuLines; i++) stdout.write('\x1b[1B\x1b[2K');
+        stdout.write(`\x1b[${menuLines}A`);
+        menuLines = 0;
       };
-
-      const getMatchingCommands = () => {
-        if (!buffer.startsWith('/')) return [];
-        const query = buffer.trim().toLowerCase();
-        if (query === '/') return COMMAND_LIST;
-        return COMMAND_LIST.filter(c => c.cmd.toLowerCase().startsWith(query));
-      };
-
       const render = () => {
         clearMenu();
-
-        // Re-render current prompt line
         readline.cursorTo(stdout, 0);
         readline.clearLine(stdout, 0);
-        
-        let displayBuffer = buffer;
-        let ghostText = '';
-        
-        // Ghost text and syntax highlighting
-        const matches = getMatchingCommands();
-        if (buffer.startsWith('/') && !buffer.includes(' ')) {
-          if (matches.length > 0) {
-            const selected = matches[selectedCommandIndex] || matches[0];
-            if (selected.cmd.startsWith(buffer.toLowerCase())) {
-              ghostText = selected.cmd.slice(buffer.length) + (selected.args ? ' ' + selected.args : '');
-            }
-          }
-          // Highlight command in cyan
-          displayBuffer = `${colors.brightCyan}${buffer}${colors.reset}`;
-        } else if (buffer.startsWith('/')) {
-          // Command + args
-          const spaceIdx = buffer.indexOf(' ');
-          displayBuffer = `${colors.brightCyan}${buffer.slice(0, spaceIdx)}${colors.reset}${colors.white}${buffer.slice(spaceIdx)}${colors.reset}`;
+        const available = terminalWidth() - 4;
+        let start = cursor;
+        let used = 0;
+        while (start > 0 && used + cellWidth(buffer[start - 1]) < available) used += cellWidth(buffer[--start]);
+        const visible = truncate(buffer.slice(start).join(''), available);
+        const items = matches();
+        selected = items.length ? (selected + items.length) % items.length : 0;
+        const placeholder = mode === 'chat' ? 'Send a message… · / commands' : 'Ask poli to build, fix, or explain…';
+        stdout.write(accent(' > ') + (buffer.length ? messageText(visible) : style.dim(truncate(placeholder, available))));
+        const cursorColumn = 3 + cellWidth(buffer.slice(start, cursor).join(''));
+        if (items.length) {
+          const count = Math.min(items.length, Math.max(1, Math.min(6, (stdout.rows || 24) - 8)));
+          const offset = Math.max(0, Math.min(selected - count + 1, items.length - count));
+          const rows = items.slice(offset, offset + count).map((item, i) => {
+            const active = offset + i === selected;
+            const label = item.cmd + (item.args ? ' ' + item.args : '');
+            const row = `${active ? '>' : ' '} ${label}`;
+            const details = terminalWidth() >= 65 ? ' '.repeat(Math.max(1, 26 - cellWidth(row))) + item.desc : '';
+            return active ? accent(truncate(row + details, terminalWidth() - 4)) : style.dim(truncate(row + details, terminalWidth() - 4));
+          });
+          rows.push(style.dim(`↑↓ select · Tab fill · Esc close · ${selected + 1}/${items.length}`));
+          const menu = rows.map(row => '   ' + row).join('\n');
+          stdout.write('\n' + menu);
+          menuLines = menu.split('\n').length;
+          stdout.write(`\x1b[${menuLines}A`);
         }
-
-        // Print prefix + colored buffer + ghost text
-        const prefixPlainLength = 3; // " > " length approximation
-        stdout.write(promptPrefix.replace(/^\n/, '') + displayBuffer + colors.dim + ghostText + colors.reset);
-        
-        // Reset cursor to the actual edit position
-        readline.cursorTo(stdout, (promptPrefix.length - 1) + cursorPos);
-
-        // If typing a slash command, render Codex-style interactive menu
-        if (matches.length > 0 && buffer.startsWith('/') && !buffer.includes(' ')) {
-          const menuLines = [];
-          const width = Math.min(stdout.columns || 80, 80);
-          const maxVisible = Math.min(matches.length, 6);
-
-          if (selectedCommandIndex >= matches.length) selectedCommandIndex = 0;
-          if (selectedCommandIndex < 0) selectedCommandIndex = matches.length - 1;
-
-          // Float the menu up with a drop shadow aesthetic
-          menuLines.push(`\n${colors.dim}╭─ ${colors.bold}${colors.brightCyan}Commands${colors.reset} ${colors.dim}(↑/↓ to navigate, Tab/Enter to select) ${'─'.repeat(Math.max(2, width - 48))}╮${colors.reset}`);
-
-          for (let i = 0; i < maxVisible; i++) {
-            const item = matches[i];
-            const isSelected = i === selectedCommandIndex;
-            const pointer = isSelected ? `${colors.brightGreen}➜ ${colors.bold}` : '   ';
-            const cmdName = (item.cmd + (item.args ? ` ${item.args}` : '')).padEnd(24);
-            const desc = item.desc.length > 40 ? item.desc.slice(0, 37) + '...' : item.desc;
-
-            if (isSelected) {
-              menuLines.push(`${colors.dim}│${colors.reset} ${pointer}${colors.brightCyan}${cmdName}${colors.reset} ${colors.brightWhite}${desc}${colors.reset}${' '.repeat(Math.max(1, width - 30 - desc.length))}${colors.dim}│${colors.reset}`);
-            } else {
-              menuLines.push(`${colors.dim}│${colors.reset} ${pointer}${colors.cyan}${cmdName}${colors.reset} ${colors.dim}${desc}${colors.reset}${' '.repeat(Math.max(1, width - 30 - desc.length))}${colors.dim}│${colors.reset}`);
-            }
-          }
-
-          if (matches.length > maxVisible) {
-            menuLines.push(`${colors.dim}│   ... and ${matches.length - maxVisible} more commands (type to filter)${' '.repeat(Math.max(1, width - 48))}${colors.dim}│${colors.reset}`);
-          }
-
-          menuLines.push(`${colors.dim}╰${'─'.repeat(Math.max(2, width - 2))}╯${colors.reset}`);
-
-          stdout.write(menuLines.join('\n'));
-          lastRenderedMenuLines = menuLines.length;
-
-          // Return cursor back to prompt input line
-          stdout.write(`\x1b[${lastRenderedMenuLines}A`);
-          readline.cursorTo(stdout, (promptPrefix.length - 1) + cursorPos);
-        }
+        readline.cursorTo(stdout, cursorColumn);
       };
-
-      const onData = (data) => {
-        const key = data.toString();
-
-        // Ctrl+C
-        if (key === '\u0003') {
-          cleanupAndResolve('/exit');
-          return;
-        }
-
-        // Ctrl+D
-        if (key === '\u0004') {
-          if (!buffer) {
-            cleanupAndResolve('/exit');
-            return;
-          }
-        }
-
-        // Enter key
-        if (key === '\r' || key === '\n') {
-          const matches = getMatchingCommands();
-          // If in slash menu and user selected an entry with arrow keys or exact match:
-          if (matches.length > 0 && buffer.startsWith('/') && !buffer.includes(' ')) {
-            const selected = matches[selectedCommandIndex] || matches[0];
-            if (selected) {
-              if (selected.args) {
-                // Keep command in prompt for user to supply args
-                buffer = selected.cmd + ' ';
-                cursorPos = buffer.length;
-                render();
-                return;
-              } else {
-                cleanupAndResolve(selected.cmd);
-                return;
-              }
-            }
-          }
-
-          cleanupAndResolve(buffer.trim());
-          return;
-        }
-
-        // Tab key (autocomplete)
-        if (key === '\t') {
-          const matches = getMatchingCommands();
-          if (matches.length > 0) {
-            const selected = matches[selectedCommandIndex] || matches[0];
-            buffer = selected.cmd + (selected.args ? ' ' : '');
-            cursorPos = buffer.length;
-            render();
-            return;
-          }
-        }
-
-        // Escape key
-        if (key === '\u001b') {
-          clearMenu();
-          return;
-        }
-
-        // Arrow keys
-        if (key === '\u001b[A') { // Up
-          const matches = getMatchingCommands();
-          if (matches.length > 0) {
-            selectedCommandIndex = (selectedCommandIndex - 1 + matches.length) % matches.length;
-            render();
-            return;
-          } else if (this.history.length > 0) {
-            // Navigate history
-            if (this.historyIndex === -1) this.historyIndex = this.history.length - 1;
-            else if (this.historyIndex > 0) this.historyIndex--;
-            buffer = this.history[this.historyIndex] || '';
-            cursorPos = buffer.length;
-            render();
-            return;
-          }
-        }
-
-        if (key === '\u001b[B') { // Down
-          const matches = getMatchingCommands();
-          if (matches.length > 0) {
-            selectedCommandIndex = (selectedCommandIndex + 1) % matches.length;
-            render();
-            return;
-          } else if (this.history.length > 0 && this.historyIndex !== -1) {
-            if (this.historyIndex < this.history.length - 1) {
-              this.historyIndex++;
-              buffer = this.history[this.historyIndex] || '';
-            } else {
-              this.historyIndex = -1;
-              buffer = '';
-            }
-            cursorPos = buffer.length;
-            render();
-            return;
-          }
-        }
-
-        if (key === '\u001b[D') { // Left
-          if (cursorPos > 0) {
-            cursorPos--;
-            render();
-          }
-          return;
-        }
-
-        if (key === '\u001b[C') { // Right
-          if (cursorPos < buffer.length) {
-            cursorPos++;
-            render();
-          }
-          return;
-        }
-
-        // Backspace
-        if (key === '\u007f' || key === '\b') {
-          if (cursorPos > 0) {
-            buffer = buffer.slice(0, cursorPos - 1) + buffer.slice(cursorPos);
-            cursorPos--;
-            selectedCommandIndex = 0;
-            render();
-          }
-          return;
-        }
-
-        // Printable characters
-        if (key.length === 1 && key >= ' ') {
-          buffer = buffer.slice(0, cursorPos) + key + buffer.slice(cursorPos);
-          cursorPos++;
-          selectedCommandIndex = 0;
-          render();
-          return;
-        }
+      const finish = (value) => {
+        clearMenu();
+        stdin.removeListener('keypress', onKey);
+        stdout.removeListener('resize', render);
+        stdin.removeListener('end', onEnd);
+        stdout.write('\x1b[?2004l\x1b[0 q');
+        stdin.setRawMode(previousRaw || false);
+        stdin.pause();
+        readline.cursorTo(stdout, 0);
+        readline.clearLine(stdout, 0);
+        if (value.startsWith('/')) stdout.write(style.dim(' > ' + truncate(value, terminalWidth() - 4)) + '\n');
+        if (value && !value.startsWith('/')) this.saveHistory(value);
+        resolve(value);
       };
-
-      stdin.on('data', onData);
+      const insert = (value) => {
+        const chars = Array.from(value.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ''));
+        buffer.splice(cursor, 0, ...chars);
+        cursor += chars.length;
+        selected = 0; dismissed = false;
+      };
+      const onEnd = () => finish('/exit');
+      const onKey = (str, key = {}) => {
+        if (key.sequence === '\x1b[200~') { pasting = true; paste = ''; return; }
+        if (key.sequence === '\x1b[201~') { pasting = false; insert(paste.replace(/[\r\n]+/g, ' ')); render(); return; }
+        if (pasting) { paste += str || key.sequence || ''; return; }
+        if (key.ctrl && key.name === 't') { this.draft = text(); finish('/details'); return; }
+        if (key.ctrl && key.name === 'c') { if (buffer.length) { buffer = []; cursor = 0; dismissed = false; } else { finish('/exit'); return; } }
+        else if (key.ctrl && key.name === 'd' && !buffer.length) { finish('/exit'); return; }
+        else if (key.name === 'return' || key.name === 'enter') {
+          const item = matches()[selected];
+          if (item && item.args.startsWith('<')) { buffer = Array.from(item.cmd + ' '); cursor = buffer.length; }
+          else { finish(item ? item.cmd : text().trim()); return; }
+        }
+        else if (key.name === 'tab') {
+          const item = matches()[selected];
+          if (item) { buffer = Array.from(item.cmd + (item.args ? ' ' : '')); cursor = buffer.length; dismissed = true; }
+        }
+        else if (key.name === 'escape') dismissed = true;
+        else if (key.name === 'up' || key.name === 'down') {
+          if (matches().length) selected += key.name === 'up' ? -1 : 1;
+          else {
+            if (this.historyIndex === -1) draft = [...buffer];
+            if (key.name === 'up') this.historyIndex = this.historyIndex === -1 ? this.history.length - 1 : Math.max(0, this.historyIndex - 1);
+            else if (this.historyIndex !== -1) this.historyIndex = this.historyIndex + 1 >= this.history.length ? -1 : this.historyIndex + 1;
+            buffer = this.historyIndex === -1 ? [...draft] : Array.from(this.history[this.historyIndex] || ''); cursor = buffer.length;
+          }
+        }
+        else if (key.name === 'left') cursor = Math.max(0, cursor - 1);
+        else if (key.name === 'right') cursor = Math.min(buffer.length, cursor + 1);
+        else if (key.name === 'home' || key.ctrl && key.name === 'a') cursor = 0;
+        else if (key.name === 'end' || key.ctrl && key.name === 'e') cursor = buffer.length;
+        else if (key.ctrl && key.name === 'u') { buffer.splice(0, cursor); cursor = 0; }
+        else if (key.ctrl && key.name === 'k') buffer.splice(cursor);
+        else if (key.name === 'backspace') { if (cursor) buffer.splice(--cursor, 1); selected = 0; dismissed = false; }
+        else if (key.name === 'delete') buffer.splice(cursor, 1);
+        else if (str && !key.ctrl && !key.meta) insert(str.replace(/[\r\n]/g, ' '));
+        render();
+      };
+      stdout.write('\x1b[?2004h\x1b[6 q');
+      stdin.on('keypress', onKey);
+      stdin.once('end', onEnd);
+      stdout.on('resize', render);
+      render();
     });
   }
 
-  confirm(message, defaultYes = true) {
+  confirm(message, defaultYes = true, { signal, onCancel } = {}) {
     return new Promise((resolve) => {
+      if (signal?.aborted) { resolve(false); return; }
+      if (!process.stdin.isTTY) { resolve(false); return; }
       const suffix = defaultYes ? ` [Y/n] ` : ` [y/N] `;
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout
       });
 
+      const stop = () => rl.close();
+      signal?.addEventListener('abort', stop, { once: true });
+      rl.once('close', () => { signal?.removeEventListener('abort', stop); resolve(false); });
+      rl.on('SIGINT', () => { onCancel?.(); rl.close(); });
       rl.question(`\n${colors.yellow}?${colors.reset} ${message}${colors.dim}${suffix}${colors.reset}`, (ans) => {
-        rl.close();
         const trimmed = ans.trim().toLowerCase();
-        if (!trimmed) {
-          resolve(defaultYes);
-        } else {
-          resolve(trimmed === 'y' || trimmed === 'yes');
-        }
+        resolve(trimmed ? trimmed === 'y' || trimmed === 'yes' : defaultYes);
+        rl.close();
       });
     });
   }

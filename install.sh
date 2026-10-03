@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Poli-code Installer
-# Install via: curl -fsSL https://raw.githubusercontent.com/zwuegdez/poli-cli/main/install.sh | bash
+# Install via:
+#   curl -fsSL https://poliai.qzz.io/install.sh | sh
+#   or: curl -fsSL https://poliai.qzz.io/codex/install.sh | sh
 # ==============================================================================
 
 set -e
@@ -21,7 +23,7 @@ BIN_NAME="poli"
 
 echo ""
 echo -e "${BOLD}${CYAN}╭────────────────────────────────────────────────────────╮${RESET}"
-echo -e "${BOLD}${CYAN}│${RESET}  ${BOLD}${CYAN}✦ POLI${RESET}${BOLD}${MAGENTA}-CODE${RESET} ${DIM}Installer${RESET}                                   ${BOLD}${CYAN}│${RESET}"
+echo -e "${BOLD}${CYAN}│${RESET}  ${BOLD}${CYAN}✦ POLI${RESET}${BOLD}${MAGENTA}-CODE${RESET} ${DIM}Installer (poliai.qzz.io)${RESET}              ${BOLD}${CYAN}│${RESET}"
 echo -e "${BOLD}${CYAN}│${RESET}  ${DIM}Next-generation Agentic AI Coding Assistant CLI       ${RESET}${BOLD}${CYAN}│${RESET}"
 echo -e "${BOLD}${CYAN}╰────────────────────────────────────────────────────────╯${RESET}"
 echo ""
@@ -67,7 +69,6 @@ chmod +x bin/poli.js
 echo -e "${CYAN}•${RESET} Configuring binary symlinks..."
 
 TARGET_DIR="/usr/local/bin"
-USE_SUDO=0
 
 if [ -w "$TARGET_DIR" ]; then
   ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli"

@@ -7,11 +7,13 @@
 
 ## ⚡ Quick 1-Line Curl Install
 
-You can install `poli-code` on any Linux or macOS machine with a single command:
+Install `poli-code` on any Linux or macOS machine with a single curl command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zwuegdez/poli-cli/main/install.sh | bash
+curl -fsSL https://poliai.qzz.io/install.sh | sh
 ```
+
+*(or via the codex-style path: `curl -fsSL https://poliai.qzz.io/codex/install.sh | sh`)*
 
 Once installed, the `poli` command is immediately available everywhere:
 ```bash

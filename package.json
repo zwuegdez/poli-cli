@@ -1,11 +1,12 @@
 {
-  "name": "poli-code",
+  "name": "poli-cli",
   "version": "1.0.0",
   "description": "Next-generation agentic AI coding CLI powered by poli-proxy",
   "main": "src/index.js",
   "type": "module",
   "bin": {
     "poli": "./bin/poli.js",
+    "poli-cli": "./bin/poli.js",
     "poli-code": "./bin/poli.js"
   },
   "scripts": {
@@ -17,6 +18,7 @@
     "coding-assistant",
     "cli",
     "agent",
+    "poli-cli",
     "poli-proxy",
     "codex",
     "claude-code",

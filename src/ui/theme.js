@@ -77,7 +77,7 @@ export const style = {
     `${colors.dim}[${colors.reset}${color}${text}${colors.reset}${colors.dim}]${colors.reset}`,
 
   poliBrand: () =>
-    `${colors.bold}${colors.brightCyan}✦ POLI${colors.reset}${colors.bold}${colors.brightMagenta}-CODE${colors.reset}`,
+    `${colors.bold}${colors.brightCyan}✦ POLI${colors.reset}${colors.bold}${colors.brightMagenta}-CLI${colors.reset}`,
 };
 
 export const symbols = {

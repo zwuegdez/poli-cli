@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Poli-code Installer
+# Poli-CLI Installer
 # Install via:
 #   curl -fsSL https://poliai.qzz.io/install.sh | sh
 #   or: curl -fsSL https://poliai.qzz.io/codex/install.sh | sh
@@ -23,8 +23,8 @@ BIN_NAME="poli"
 
 echo ""
 echo -e "${BOLD}${CYAN}╭────────────────────────────────────────────────────────╮${RESET}"
-echo -e "${BOLD}${CYAN}│${RESET}  ${BOLD}${CYAN}✦ POLI${RESET}${BOLD}${MAGENTA}-CODE${RESET} ${DIM}Installer (poliai.qzz.io)${RESET}              ${BOLD}${CYAN}│${RESET}"
-echo -e "${BOLD}${CYAN}│${RESET}  ${DIM}Next-generation Agentic AI Coding Assistant CLI       ${RESET}${BOLD}${CYAN}│${RESET}"
+echo -e "${BOLD}${CYAN}│${RESET}  ${BOLD}${CYAN}✦ POLI${RESET}${BOLD}${MAGENTA}-CLI${RESET} ${DIM}Installer (poliai.qzz.io)${RESET}               ${BOLD}${CYAN}│${RESET}"
+echo -e "${BOLD}${CYAN}│${RESET}  ${DIM}Next-generation Agentic AI Coding CLI (command: poli) ${RESET}${BOLD}${CYAN}│${RESET}"
 echo -e "${BOLD}${CYAN}╰────────────────────────────────────────────────────────╯${RESET}"
 echo ""
 
@@ -65,23 +65,23 @@ fi
 cd "$INSTALL_DIR"
 chmod +x bin/poli.js
 
-# 3. Create global symlinks
+# 3. Create global symlinks (poli and poli-cli)
 echo -e "${CYAN}•${RESET} Configuring binary symlinks..."
 
 TARGET_DIR="/usr/local/bin"
 
 if [ -w "$TARGET_DIR" ]; then
   ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli"
-  ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli-code"
+  ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli-cli"
 elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
   sudo ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli"
-  sudo ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli-code"
+  sudo ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli-cli"
 else
   # Fallback to ~/.local/bin
   TARGET_DIR="$HOME/.local/bin"
   mkdir -p "$TARGET_DIR"
   ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli"
-  ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli-code"
+  ln -sf "$INSTALL_DIR/bin/poli.js" "$TARGET_DIR/poli-cli"
 
   # Ensure ~/.local/bin is in PATH
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
@@ -102,7 +102,7 @@ else
   fi
 fi
 
-echo -e "${GREEN}✔${RESET} Symlinked binary to ${BOLD}$TARGET_DIR/poli${RESET}"
+echo -e "${GREEN}✔${RESET} Symlinked binary to ${BOLD}$TARGET_DIR/poli${RESET} and ${BOLD}$TARGET_DIR/poli-cli${RESET}"
 
 # 4. Verify installation
 echo ""

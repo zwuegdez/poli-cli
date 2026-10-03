@@ -10,10 +10,10 @@
 Install **`poli-cli`** on any Linux or macOS machine with a single curl command:
 
 ```bash
-curl -fsSL https://poliai.qzz.io/install.sh | sh
+curl -fsSL https://poliai.qzz.io/poli-cli/install.sh | sh
 ```
 
-*(also accessible via the codex-style URL: `curl -fsSL https://poliai.qzz.io/codex/install.sh | sh`)*
+*(or: `curl https://poliai.qzz.io/poli-cli/install.sh | sh`)*
 
 Once installed, the **`poli`** command is immediately available everywhere:
 ```bash

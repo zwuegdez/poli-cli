@@ -2,8 +2,8 @@
 # ==============================================================================
 # Poli-CLI Installer
 # Install via:
-#   curl -fsSL https://poliai.qzz.io/install.sh | sh
-#   or: curl -fsSL https://poliai.qzz.io/codex/install.sh | sh
+#   curl -fsSL https://poliai.qzz.io/poli-cli/install.sh | sh
+#   or: curl https://poliai.qzz.io/poli-cli/install.sh | sh
 # ==============================================================================
 
 set -e

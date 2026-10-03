@@ -225,6 +225,29 @@ poli login
 
 ---
 
+## 🛠️ Troubleshooting
+
+### `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'marked'`
+
+The installed copy's `node_modules` is missing or out of sync with the code
+(this can happen if the dependency install step was interrupted, or the
+installation was updated with `git pull` without reinstalling). Fix it with:
+
+```bash
+cd ~/.poli-cli && npm install
+```
+
+or re-run the installer:
+
+```bash
+curl -fsSL https://poliai.qzz.io/poli-cli/install.sh | sh
+```
+
+Recent versions of `poli` detect this situation and try to repair it
+automatically; the commands above are the manual equivalent.
+
+---
+
 ## 📄 License
 
 MIT © 2026 poliai (`zwuegdez`)

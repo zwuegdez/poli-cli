@@ -43,6 +43,13 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v npm >/dev/null 2>&1; then
+  echo -e "${RED}✖ Error: 'npm' was not found on PATH (it ships with Node.js).${RESET}"
+  echo -e "  If you use nvm or another version manager, load it first, e.g.:"
+  echo -e "  export NVM_DIR=\"\$HOME/.nvm\" && . \"\$NVM_DIR/nvm.sh\""
+  exit 1
+fi
+
 NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
 if [ "$NODE_VERSION" -lt 18 ]; then
   echo -e "${YELLOW}⚠ Warning: Node.js version $(node -v) detected. Node.js 18+ is recommended.${RESET}"
@@ -64,7 +71,21 @@ else
 fi
 
 echo -e "${CYAN}•${RESET} Installing runtime dependencies..."
-npm install --omit=dev --silent
+if ! (cd "$INSTALL_DIR" && npm install --omit=dev --no-audit --no-fund --silent); then
+  echo -e "${YELLOW}⚠ Silent install failed — retrying with full npm output...${RESET}"
+  if ! (cd "$INSTALL_DIR" && npm install --omit=dev --no-audit --no-fund); then
+    echo -e "${RED}✖ Error: failed to install dependencies in $INSTALL_DIR.${RESET}"
+    echo -e "  Check your network connection and npm configuration, then re-run this installer."
+    exit 1
+  fi
+fi
+
+# Verify the runtime dependencies actually resolve before wiring up binaries.
+if ! (cd "$INSTALL_DIR" && node -e "Promise.all([import('marked'), import('cli-highlight')]).then(() => {}).catch((err) => { console.error(err.message); process.exit(1); });"); then
+  echo -e "${RED}✖ Error: dependencies failed to load after installation.${RESET}"
+  echo -e "  Try: cd \"$INSTALL_DIR\" && rm -rf node_modules && npm install"
+  exit 1
+fi
 
 chmod +x bin/poli.js
 

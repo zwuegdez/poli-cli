@@ -62,17 +62,19 @@ export class TurnInput {
     const longDraft = cellWidth(this.buffer.join('')) > width / 2;
     const status = this.activity ? (longDraft ? frame : `${frame} ${this.activity}${this.elapsed ? ' · ' + this.elapsed : ''}`) : (longDraft ? '' : 'Enter send · Esc stop');
     const statusWidth = this.notice ? 0 : Math.min(cellWidth(status), Math.max(0, Math.min(32, Math.floor(width / 2) - 2)));
-    const available = Math.max(1, width - 5 - (statusWidth ? statusWidth + 2 : 0));
+    const prompt = '› ';
+    const promptWidth = cellWidth(prompt);
+    const available = Math.max(1, width - promptWidth - (statusWidth ? statusWidth + 2 : 0));
     let start = this.cursor, used = 0;
     while (start && used + cellWidth(this.buffer[start - 1]) < available) used += cellWidth(this.buffer[--start]);
     const value = truncate(this.buffer.slice(start).join(''), available);
     this.clear();
     const placeholder = this.notice || 'Type a follow-up…';
-    this.rawWrite(`${accent(' > ')}${this.buffer.length ? messageText(value) : style.dim(truncate(placeholder, available))}`);
+    this.rawWrite(`${accent(prompt)}${this.buffer.length ? messageText(value) : style.dim(truncate(placeholder, available))}`);
     if (statusWidth) {
       this.rawWrite(`\r\x1b[${width - statusWidth - 2}C${this.activity ? accent(truncate(status, statusWidth)) : style.dim(truncate(status, statusWidth))}`);
     }
-    this.rawWrite(`\r\x1b[${3 + cellWidth(this.buffer.slice(start, this.cursor).join(''))}C`);
+    this.rawWrite(`\r\x1b[${promptWidth + cellWidth(this.buffer.slice(start, this.cursor).join(''))}C`);
   }
   setActivity(text, frame = 0, elapsed = '') {
     if (text && text !== this.activity && !this.queue.length) this.notice = '';

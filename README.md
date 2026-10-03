@@ -45,17 +45,17 @@ Backed directly by the **`poli-proxy` router** (`https://router.poliai.qzz.io/v1
   - `file_search`: Glob and substring filename search.
   - `list_dir`: Interactive directory inspection.
 - **💬 Dual Execution Modes**:
-  - **Interactive REPL**: Rich full-terminal interface with rounded cards, live spinners with timers, and slash commands.
+  - **Interactive REPL**: Polished full-terminal interface with a live composer, streaming output, status-aware tool summaries, and slash commands.
   - **One-Shot Mode**: Run single tasks from command-line arguments: `poli "fix the failing tests"`.
 - **🎨 Full Terminal UI Experience**:
-  - Rounded border cards for user messages and assistant responses.
-  - Dedicated tool cards showing arguments, execution status, and millisecond duration.
+  - A calm, Codex-inspired transcript: neutral reading text, restrained mint accents, and clear role markers.
+  - A responsive welcome screen that surfaces workspace, branch, model, mode, and approval policy at a glance.
+  - Compact, status-colored tool activity with readable action names, duration, output previews, and full details on demand.
   - Colorized unified diffs before modifying files.
   - Interactive approvals (with `-y` / `--yes` bypass flag).
   - Live animated spinners with elapsed time counter (`[2.4s]`).
   - Markdown syntax highlighting with labeled, easy-to-scan code blocks.
   - Live token metrics counter in prompt.
-  - Adaptive welcome banner that keeps workspace, branch, model, mode, and approvals readable on narrow terminals.
   - Word-aware wrapping and terminal-cell-aware layout for Unicode and narrow windows.
   - Scrollable command palette, paste support, and horizontal input scrolling.
   - Blockwise Markdown streaming that preserves terminal scrollback.
@@ -168,17 +168,18 @@ unframed; fenced code gets a concise language label and a light left gutter. The
 indicator is a small animated dot.
 Output uses normal terminal scrollback; use your terminal’s scrollbar, mouse wheel, or
 Shift+PageUp / Shift+PageDown to browse earlier messages.
-The adaptive shell-style welcome screen keeps workspace, branch, model, mode, and approval state together. User messages
-appear once with a `>` prompt; assistant replies start with `poli:`. Tool results use compact action summaries
-(for example, `• Explored` followed by `└ Read src/app.js`), with extra detail for failures. The model
+The adaptive welcome screen groups workspace, branch, model, mode, and approval state, then offers a clear first step. User messages
+appear once with a `›` prompt; assistant replies use the Poli mark. Tool results use compact status-colored action summaries
+(for example, `✓ Read src/app.js · 68 lines · 12ms`), with extra detail for failures. The model
 picker marks the active choice with a check. Input shortcuts appear beside a draft
 when the terminal has enough room.
 The chat keeps one blank line between messages. Model and mode stay in the welcome
-screen; `/status` and `/tokens` show details on demand. Message text is green. The input stays separate from the animated action status,
+screen; `/status` and `/tokens` show details on demand. Reading text follows the terminal's default foreground, while color highlights
+navigation, status, and syntax. The input stays separate from the animated action status,
 with a reply indicator during chat and an action label during tool execution. The input uses a thin cursor, restored
 to the terminal default when poli releases the keyboard.
 CLI labels and status messages are in English (`Replying…`, `Preparing action…`).
-Activity rows use compact `[ok]`, `[err]`, and `[skip]` tags with indented results. File changes include numbered
+Activity rows use compact `✓`, `×`, and `!` status marks with indented results. File changes include numbered
 red/green previews. Commands show a short output preview after completion; Ctrl+T or
 `/details` shows the latest completed tool result without submitting it to the model.
 Ctrl+T preserves the current draft, both during work and at the idle prompt.

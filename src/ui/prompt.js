@@ -104,16 +104,18 @@ export class PromptManager {
         clearMenu();
         readline.cursorTo(stdout, 0);
         readline.clearLine(stdout, 0);
-        const available = terminalWidth() - 4;
+        const prompt = '› ';
+        const promptWidth = cellWidth(prompt);
+        const available = Math.max(1, terminalWidth() - promptWidth - 1);
         let start = cursor;
         let used = 0;
         while (start > 0 && used + cellWidth(buffer[start - 1]) < available) used += cellWidth(buffer[--start]);
         const visible = truncate(buffer.slice(start).join(''), available);
         const items = matches();
         selected = items.length ? (selected + items.length) % items.length : 0;
-        const placeholder = mode === 'chat' ? 'Send a message… · / commands' : 'Ask poli to build, fix, or explain…';
-        stdout.write(accent(' > ') + (buffer.length ? messageText(visible) : style.dim(truncate(placeholder, available))));
-        const cursorColumn = 3 + cellWidth(buffer.slice(start, cursor).join(''));
+        const placeholder = mode === 'chat' ? 'Message poli… · / commands' : 'Describe a task or ask… · / commands';
+        stdout.write(accent(prompt) + (buffer.length ? messageText(visible) : style.dim(truncate(placeholder, available))));
+        const cursorColumn = promptWidth + cellWidth(buffer.slice(start, cursor).join(''));
         if (items.length) {
           const count = Math.min(items.length, Math.max(1, Math.min(6, (stdout.rows || 24) - 8)));
           const offset = Math.max(0, Math.min(selected - count + 1, items.length - count));
@@ -122,7 +124,8 @@ export class PromptManager {
             const label = item.cmd + (item.args ? ' ' + item.args : '');
             const row = `${active ? '>' : ' '} ${label}`;
             const details = terminalWidth() >= 65 ? ' '.repeat(Math.max(1, 26 - cellWidth(row))) + item.desc : '';
-            return active ? accent(truncate(row + details, terminalWidth() - 4)) : style.dim(truncate(row + details, terminalWidth() - 4));
+            const itemLine = truncate(row + details, Math.max(1, terminalWidth() - 4));
+            return active ? accent(itemLine) : style.dim(itemLine);
           });
           rows.push(style.dim(`↑↓ select · Tab fill · Esc close · ${selected + 1}/${items.length}`));
           const menu = rows.map(row => '   ' + row).join('\n');
@@ -142,7 +145,7 @@ export class PromptManager {
         stdin.pause();
         readline.cursorTo(stdout, 0);
         readline.clearLine(stdout, 0);
-        if (value.startsWith('/')) stdout.write(style.dim(' > ' + truncate(value, terminalWidth() - 4)) + '\n');
+        if (value.startsWith('/')) stdout.write(style.dim(' › ' + truncate(value, terminalWidth() - 4)) + '\n');
         if (value && !value.startsWith('/')) this.saveHistory(value);
         resolve(value);
       };

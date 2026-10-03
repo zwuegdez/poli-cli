@@ -71,7 +71,7 @@ export class PoliAgent {
           first = false;
           if (turnInput.active) spinner.update('Replying…');
           else spinner.stop();
-          process.stdout.write('\n' + style.bold('poli:') + '\n');
+          process.stdout.write('\n' + style.poliBrand() + '\n');
         };
         const chunks = chunk => {
           if (chunk.type === 'content') {

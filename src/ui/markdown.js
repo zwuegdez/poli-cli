@@ -1,4 +1,4 @@
-import { colors, style, cellWidth, messageText, plainText, terminalWidth, wrapText } from './theme.js';
+import { colors, style, cellWidth, messageText, plainText, terminalWidth, truncate, wrapText } from './theme.js';
 import { marked } from 'marked';
 import { highlight, supportsLanguage } from 'cli-highlight';
 
@@ -20,7 +20,11 @@ renderer.code = (code, language = '') => {
   if (colors.reset && syntax && supportsLanguage(syntax)) {
     try { formatted = highlight(code, { language: syntax, ignoreIllegals: true }); } catch {}
   }
-  return '\n' + style.dim(language || 'code') + '\n' + wrapText(formatted, Math.max(1, terminalWidth() - 2)).map(line => '  ' + line).join('\n') + '\n\n';
+  const width = terminalWidth();
+  const contentWidth = Math.max(1, width - 4);
+  const label = language ? `code · ${language}` : 'code';
+  const lines = wrapText(formatted.replace(/\n$/, ''), contentWidth);
+  return '\n' + style.dim(`  ${truncate(label, width - 2)}`) + '\n' + lines.map(line => `  ${style.dim('│')} ${line}`).join('\n') + '\n\n';
 };
 renderer.heading = (text, level) => `\n${style.bold(level < 3 ? style.brightCyan(text) : text)}\n\n`;
 renderer.paragraph = text => text + '\n\n';

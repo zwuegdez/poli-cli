@@ -53,9 +53,10 @@ Backed directly by the **`poli-proxy` router** (`https://router.poliai.qzz.io/v1
   - Colorized unified diffs before modifying files.
   - Interactive approvals (with `-y` / `--yes` bypass flag).
   - Live animated spinners with elapsed time counter (`[2.4s]`).
-  - Markdown syntax highlighting for code blocks in terminal.
+  - Markdown syntax highlighting with labeled, easy-to-scan code blocks.
   - Live token metrics counter in prompt.
-  - Responsive mint-accented UI with terminal-cell-aware layout for Unicode and narrow windows.
+  - Adaptive welcome banner that keeps workspace, branch, model, mode, and approvals readable on narrow terminals.
+  - Word-aware wrapping and terminal-cell-aware layout for Unicode and narrow windows.
   - Scrollable command palette, paste support, and horizontal input scrolling.
   - Blockwise Markdown streaming that preserves terminal scrollback.
 - **🔄 Multi-Model Switching**:
@@ -141,7 +142,7 @@ npm run ui:preview
 
 The preview shows the welcome screen, conversation, tool result, and code block.
 In a terminal, try `/`, arrow keys, Tab, or pasting text. Enter closes the preview.
-Use `NO_COLOR=1` for plain output.
+Use `FORCE_COLOR=1` to force ANSI color, or `NO_COLOR=1` for plain output.
 
 Input shortcuts: Home / Ctrl+A, End / Ctrl+E, Ctrl+U to clear before the cursor,
 and Ctrl+K to clear after it. Ctrl+C clears the draft; on an empty draft it exits.
@@ -162,11 +163,12 @@ and returns to the prompt; `/retry` continues afterwards. While poli works, the 
 stays available directly below the chat: type a follow-up and press Enter to queue
 it. Queued messages are processed after the current response or tool batch completes.
 Unsent drafts and submitted messages survive cancellation. The composer pauses for
-explicit tool approvals. Shell output appears as complete lines. Chat, tool results, and
-code blocks have no decorative frames. The working indicator is a small animated dot.
+explicit tool approvals. Shell output appears as complete lines. Chat and tool results stay
+unframed; fenced code gets a concise language label and a light left gutter. The working
+indicator is a small animated dot.
 Output uses normal terminal scrollback; use your terminal’s scrollbar, mouse wheel, or
 Shift+PageUp / Shift+PageDown to browse earlier messages.
-The shell-style welcome screen keeps workspace, model, git branch, and approval mode together. User messages
+The adaptive shell-style welcome screen keeps workspace, branch, model, mode, and approval state together. User messages
 appear once with a `>` prompt; assistant replies start with `poli:`. Tool results use compact action summaries
 (for example, `• Explored` followed by `└ Read src/app.js`), with extra detail for failures. The model
 picker marks the active choice with a check. Input shortcuts appear beside a draft

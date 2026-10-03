@@ -1,13 +1,15 @@
 // UI Theme, ANSI styling, gradients, and terminal formatting utilities
 import { stripVTControlCharacters } from 'node:util';
 
-const isColorSupported = !process.env.NO_COLOR && (process.stdout.isTTY || process.env.FORCE_COLOR);
+const forcedColor = process.env.FORCE_COLOR != null && process.env.FORCE_COLOR !== '0';
+const isColorSupported = !('NO_COLOR' in process.env) && process.env.TERM !== 'dumb' && (process.stdout.isTTY || forcedColor);
 const isTrueColorSupported = isColorSupported && (
   process.env.COLORTERM === 'truecolor' ||
   process.env.TERM?.includes('24bit') ||
   process.env.TERM?.includes('xterm-256color') ||
   process.platform !== 'win32'
 );
+const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 export const colors = {
   reset: isColorSupported ? '\x1b[0m' : '',
@@ -18,11 +20,11 @@ export const colors = {
 
   black: isColorSupported ? '\x1b[30m' : '',
   red: isColorSupported ? '\x1b[31m' : '',
-  green: isColorSupported ? '\x1b[92m' : '',
+  green: isColorSupported ? '\x1b[32m' : '',
   yellow: isColorSupported ? '\x1b[33m' : '',
   blue: isColorSupported ? '\x1b[34m' : '',
   magenta: isColorSupported ? '\x1b[35m' : '',
-  cyan: isColorSupported ? '\x1b[92m' : '',
+  cyan: isColorSupported ? '\x1b[36m' : '',
   white: isColorSupported ? '\x1b[37m' : '',
   gray: isColorSupported ? '\x1b[90m' : '',
 
@@ -31,7 +33,7 @@ export const colors = {
   brightYellow: isColorSupported ? '\x1b[93m' : '',
   brightBlue: isColorSupported ? '\x1b[94m' : '',
   brightMagenta: isColorSupported ? '\x1b[95m' : '',
-  brightCyan: isColorSupported ? '\x1b[92m' : '',
+  brightCyan: isColorSupported ? '\x1b[96m' : '',
   brightWhite: isColorSupported ? '\x1b[97m' : '',
 
   bgBlack: isColorSupported ? '\x1b[40m' : '',
@@ -51,15 +53,17 @@ export const colors = {
 
 export function gradientText(text, colorStart, colorEnd) {
   if (!isTrueColorSupported) return `${colors.brightCyan}${text}${colors.reset}`;
-  const rStep = (colorEnd[0] - colorStart[0]) / Math.max(1, text.length - 1);
-  const gStep = (colorEnd[1] - colorStart[1]) / Math.max(1, text.length - 1);
-  const bStep = (colorEnd[2] - colorStart[2]) / Math.max(1, text.length - 1);
+  const glyphs = [...segments.segment(String(text))].map(({ segment }) => segment);
+  const last = Math.max(1, glyphs.length - 1);
+  const rStep = (colorEnd[0] - colorStart[0]) / last;
+  const gStep = (colorEnd[1] - colorStart[1]) / last;
+  const bStep = (colorEnd[2] - colorStart[2]) / last;
   let res = '';
-  for (let i = 0; i < text.length; i++) {
+  for (let i = 0; i < glyphs.length; i++) {
     const r = Math.round(colorStart[0] + rStep * i);
     const g = Math.round(colorStart[1] + gStep * i);
     const b = Math.round(colorStart[2] + bStep * i);
-    res += `\x1b[38;2;${r};${g};${b}m${text[i]}`;
+    res += `\x1b[38;2;${r};${g};${b}m${glyphs[i]}`;
   }
   return res + colors.reset;
 }
@@ -125,7 +129,6 @@ export const symbols = {
 
 // Measure terminal cells rather than JavaScript string length (ANSI, emoji, CJK).
 const ansi = /\x1b\[[0-?]*[ -/]*[@-~]/g;
-const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 export function stripAnsi(text) { return String(text).replace(ansi, ''); }
 export function plainText(text) {
   return stripVTControlCharacters(String(text)).replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
@@ -144,27 +147,93 @@ export function cellWidth(text) {
 }
 export function terminalWidth(max = 96) { return Math.max(8, Math.min(process.stdout.columns || 80, max)); }
 export function wrapText(text, width) {
-  width = Math.max(1, width);
+  width = Math.max(1, Math.floor(width));
   const lines = [];
-  for (const line of String(text).replace(/\t/g, '    ').split('\n')) {
-    let current = '', cells = 0;
-    for (const token of line.match(/\x1b\[[0-?]*[ -/]*[@-~]|[^\x1b]+/g) || []) {
-      if (token.startsWith('\x1b')) { current += token; continue; }
-      for (const { segment } of segments.segment(token)) {
-        const size = cellWidth(segment);
-        if (cells + size > width && cells) { lines.push(current); current = ''; cells = 0; }
-        current += size > width ? '?' : segment;
-        cells += Math.min(size, width);
+  for (const sourceLine of String(text).replace(/\t/g, '    ').split('\n')) {
+    let current = [], cells = 0, lastSpace = -1;
+    const emit = tokens => {
+      let end = tokens.length;
+      while (end && tokens[end - 1].space) end--;
+      lines.push(tokens.slice(0, end).map(token => token.raw).join(''));
+    };
+    const widthOf = tokens => tokens.reduce((sum, token) => sum + token.width, 0);
+    const lastWhitespace = tokens => {
+      for (let i = tokens.length - 1; i >= 0; i--) if (tokens[i].space) return i;
+      return -1;
+    };
+    const add = token => {
+      if (token.width > width) token = { ...token, raw: '?', width: 1, space: false };
+      if (token.space && cells + token.width > width && cells) {
+        emit(current);
+        current = [];
+        cells = 0;
+        lastSpace = -1;
+        return;
       }
+      while (cells + token.width > width && cells) {
+        if (lastSpace >= 0) {
+          let left = current.slice(0, lastSpace);
+          while (left.length && left.at(-1).space) left = left.slice(0, -1);
+          emit(left);
+          current = current.slice(lastSpace + 1);
+          cells = widthOf(current);
+          lastSpace = lastWhitespace(current);
+        } else {
+          // A single unbroken token is wrapped by grapheme, never by UTF-16 unit.
+          emit(current);
+          current = [];
+          cells = 0;
+          lastSpace = -1;
+        }
+      }
+      current.push(token);
+      cells += token.width;
+      if (token.space) lastSpace = current.length - 1;
+    };
+
+    for (const token of sourceLine.match(/\x1b\[[0-?]*[ -/]*[@-~]|[^\x1b]+/g) || []) {
+      if (token.startsWith('\x1b')) add({ raw: token, width: 0, space: false });
+      else for (const { segment } of segments.segment(token)) add({ raw: segment, width: cellWidth(segment), space: /^\s$/u.test(segment) });
     }
-    lines.push(current);
+    lines.push(current.map(token => token.raw).join(''));
   }
   return lines;
 }
 export function truncate(text, width) {
+  width = Math.max(0, Math.floor(width));
+  if (!width) return '';
   const plain = plainText(text).replace(/[\r\n\t]/g, ' ');
   if (cellWidth(plain) <= width) return plain;
-  return wrapText(plain, Math.max(1, width - 1))[0] + '…';
+  if (width === 1) return '…';
+  return wrapText(plain, width - 1)[0] + '…';
+}
+
+export function truncateMiddle(text, width) {
+  width = Math.max(0, Math.floor(width));
+  if (!width) return '';
+  const plain = plainText(text).replace(/[\r\n\t]/g, ' ');
+  if (cellWidth(plain) <= width) return plain;
+  if (width === 1) return '…';
+
+  const glyphs = [...segments.segment(plain)].map(({ segment }) => segment);
+  const room = width - 1;
+  const leftLimit = Math.ceil(room / 2);
+  const left = [];
+  let leftWidth = 0;
+  while (glyphs.length && leftWidth + cellWidth(glyphs[0]) <= leftLimit) {
+    const glyph = glyphs.shift();
+    left.push(glyph);
+    leftWidth += cellWidth(glyph);
+  }
+  const right = [];
+  let rightWidth = 0;
+  const rightLimit = room - leftWidth;
+  while (glyphs.length && rightWidth + cellWidth(glyphs.at(-1)) <= rightLimit) {
+    const glyph = glyphs.pop();
+    right.unshift(glyph);
+    rightWidth += cellWidth(glyph);
+  }
+  return left.join('') + '…' + right.join('');
 }
 export const accent = (text) => `${colors.rgb(155, 255, 140)}${text}${colors.reset}`;
 export function messageText(text) {
@@ -189,13 +258,37 @@ export function box(title, content, options = {}) {
 
 export function banner({ version = '1.0.0', model = 'gpt-6.1-sol', cwd = process.cwd(), branch = '', autoApprove = false, mode = 'agent' } = {}) {
   const width = terminalWidth();
-  return [
-    `${style.bold('poli-cli')} ${style.dim('v' + version)}`,
-    style.dim(truncate(cwd + (branch ? '  git:' + branch : ''), width)),
-    ...wrapText(`${mode === 'chat' ? 'chat' : 'agent'} · ${model} · approvals:${autoApprove ? 'auto' : 'ask'}`, width).map(style.dim),
-    '',
-    style.dim('Enter send · / commands · Ctrl+T tool details'),
-  ].map(line => cellWidth(line) > width ? wrapText(line, width).join('\n') : line).join('\n');
+  const rows = [];
+  const brand = `${style.poliBrand()}  ${style.dim('v' + version)}`;
+  rows.push(...wrapText(brand, width));
+
+  const placeLabel = width >= 28 ? 'workspace ' : 'dir ';
+  const place = truncateMiddle(cwd, Math.max(1, width - cellWidth(placeLabel)));
+  rows.push(`${style.dim(placeLabel)}${style.white(place)}`);
+
+  const modeLabel = mode === 'chat' ? 'chat' : 'agent';
+  if (width >= 13) {
+    const modePrefix = `${modeLabel} · `;
+    const modelText = truncateMiddle(model, Math.max(1, width - cellWidth(modePrefix)));
+    rows.push(`${style.bold(modeLabel)}${style.dim(' · ')}${style.white(modelText)}`);
+  } else {
+    rows.push(style.bold(truncate(modeLabel, width)));
+    const modelPrefix = 'model ';
+    rows.push(`${style.dim(modelPrefix)}${style.white(truncateMiddle(model, width - cellWidth(modelPrefix)))}`);
+  }
+
+  if (branch) {
+    const gitPrefix = 'git ';
+    rows.push(`${style.dim(gitPrefix)}${style.white(truncateMiddle(branch, Math.max(1, width - cellWidth(gitPrefix))))}`);
+  }
+  const approval = autoApprove ? (width >= 30 ? 'auto-approve' : 'auto') : (width >= 30 ? 'ask before changes' : 'ask');
+  const approvalPrefix = width >= 20 ? 'approvals · ' : '';
+  rows.push(`${style.dim(approvalPrefix)}${style.white(approval)}`);
+
+  rows.push('');
+  rows.push(style.dim('─'.repeat(Math.min(width, 48))));
+  rows.push(...wrapText('Enter to send · / commands · Ctrl+T details', width).map(style.dim));
+  return rows.join('\n');
 }
 
 export function chatMessage(role, text, { queued = false } = {}) {

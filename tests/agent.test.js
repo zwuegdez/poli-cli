@@ -158,6 +158,6 @@ test('empty tool results are reported as failures instead of successful actions'
       assert.match(messages.at(-1).content,/Tool returned no result/);
       return {message:{content:'Recovered'}};
     }}});await agent.runTurn('inspect');`);
-  assert.match(output,/\[err\]/);
-  assert.doesNotMatch(output,/\[ok\]/);
+  assert.match(output,/× Listed/);
+  assert.doesNotMatch(output,/✓ Listed/);
 });

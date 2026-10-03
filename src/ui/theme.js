@@ -69,8 +69,10 @@ export function gradientText(text, colorStart, colorEnd) {
 }
 
 export const style = {
-  bold: (t) => `${colors.bold}${colors.brightGreen}${t}${colors.reset}`,
-  dim: (t) => `${colors.dim}${colors.green}${t}${colors.reset}`,
+  // Keep long-form content on the terminal's natural foreground. Color is a
+  // signal for state and navigation, not a tint applied to every sentence.
+  bold: (t) => `${colors.bold}${t}${colors.reset}`,
+  dim: (t) => `${colors.dim}${t}${colors.reset}`,
   italic: (t) => `${colors.italic}${t}${colors.reset}`,
   underline: (t) => `${colors.underline}${t}${colors.reset}`,
 
@@ -236,13 +238,16 @@ export function truncateMiddle(text, width) {
   return left.join('') + '…' + right.join('');
 }
 export const accent = (text) => `${colors.rgb(155, 255, 140)}${text}${colors.reset}`;
-export function messageText(text) {
-  if (!colors.reset) return String(text);
-  return colors.green + String(text).replaceAll(colors.reset, colors.reset + colors.green) + colors.reset;
-}
+
+// Model output should use the user's configured terminal foreground. Accent
+// colors are reserved for prompts, labels, and syntax so long answers stay calm.
+export function messageText(text) { return String(text); }
 
 export function section(title, content, { width = terminalWidth() } = {}) {
-  return [accent(style.bold(truncate(title, width))), '', ...wrapText(content, width)].join('\n');
+  width = Math.max(4, Math.floor(width));
+  const heading = `${accent('✦')} ${style.bold(truncate(title, Math.max(1, width - 2)))}`;
+  const rule = style.dim('─'.repeat(Math.min(width, 44)));
+  return [heading, rule, '', ...wrapText(content, width)].join('\n');
 }
 
 export function box(title, content, options = {}) {
@@ -259,35 +264,51 @@ export function box(title, content, options = {}) {
 export function banner({ version = '1.0.0', model = 'gpt-6.1-sol', cwd = process.cwd(), branch = '', autoApprove = false, mode = 'agent' } = {}) {
   const width = terminalWidth();
   const rows = [];
-  const brand = `${style.poliBrand()}  ${style.dim('v' + version)}`;
-  rows.push(...wrapText(brand, width));
+  const brand = style.poliBrand();
+  const versionLabel = `v${version}`;
+  const brandWidth = cellWidth('✦ poli');
+  const versionWidth = cellWidth(versionLabel);
+  if (brandWidth + versionWidth + 2 <= width) {
+    rows.push(`${brand}${' '.repeat(Math.max(2, width - brandWidth - versionWidth))}${style.dim(versionLabel)}`);
+  } else {
+    rows.push(...wrapText(brand, width));
+    rows.push(...wrapText(style.dim(versionLabel), width));
+  }
 
   const placeLabel = width >= 28 ? 'workspace ' : 'dir ';
   const place = truncateMiddle(cwd, Math.max(1, width - cellWidth(placeLabel)));
-  rows.push(`${style.dim(placeLabel)}${style.white(place)}`);
-
-  const modeLabel = mode === 'chat' ? 'chat' : 'agent';
-  if (width >= 13) {
-    const modePrefix = `${modeLabel} · `;
-    const modelText = truncateMiddle(model, Math.max(1, width - cellWidth(modePrefix)));
-    rows.push(`${style.bold(modeLabel)}${style.dim(' · ')}${style.white(modelText)}`);
-  } else {
-    rows.push(style.bold(truncate(modeLabel, width)));
-    const modelPrefix = 'model ';
-    rows.push(`${style.dim(modelPrefix)}${style.white(truncateMiddle(model, width - cellWidth(modelPrefix)))}`);
-  }
+  rows.push(`${style.dim(placeLabel)}${style.bold(place)}`);
 
   if (branch) {
     const gitPrefix = 'git ';
     rows.push(`${style.dim(gitPrefix)}${style.white(truncateMiddle(branch, Math.max(1, width - cellWidth(gitPrefix))))}`);
   }
+
+  const modeLabel = mode === 'chat' ? 'chat' : 'agent';
+  if (width >= 13) {
+    const modePrefix = `${modeLabel} · `;
+    const modelText = truncateMiddle(model, Math.max(1, width - cellWidth(modePrefix)));
+    rows.push(`${accent(modeLabel)}${style.dim(' · ')}${style.bold(modelText)}`);
+  } else {
+    rows.push(accent(truncate(modeLabel, width)));
+    const modelPrefix = 'model ';
+    rows.push(`${style.dim(modelPrefix)}${style.bold(truncateMiddle(model, Math.max(1, width - cellWidth(modelPrefix))))}`);
+  }
+
   const approval = autoApprove ? (width >= 30 ? 'auto-approve' : 'auto') : (width >= 30 ? 'ask before changes' : 'ask');
   const approvalPrefix = width >= 20 ? 'approvals · ' : '';
-  rows.push(`${style.dim(approvalPrefix)}${style.white(approval)}`);
+  rows.push(`${style.dim(approvalPrefix)}${style.bold(approval)}`);
 
   rows.push('');
-  rows.push(style.dim('─'.repeat(Math.min(width, 48))));
-  rows.push(...wrapText('Enter to send · / commands · Ctrl+T details', width).map(style.dim));
+  rows.push(style.dim('─'.repeat(Math.min(width, 52))));
+  if (width >= 20) {
+    rows.push(...wrapText(style.bold('Ready when you are.'), width));
+    rows.push(...wrapText('Describe a task or ask a question in this workspace.', width).map(style.dim));
+    rows.push(...wrapText('Enter to send · / commands · ↑↓ history', width).map(style.dim));
+  } else {
+    rows.push(...wrapText(style.bold('Ready.'), width));
+    rows.push(...wrapText('Type / for help.', width).map(style.dim));
+  }
   return rows.join('\n');
 }
 
@@ -295,23 +316,37 @@ export function chatMessage(role, text, { queued = false } = {}) {
   const width = terminalWidth();
   if (role === 'user') {
     const lines = wrapText(plainText(text), Math.max(1, width - 2));
-    return lines.map((line, index) => `${index ? '  ' : accent('> ')}${messageText(line)}`).join('\n') + (queued ? '\n' + style.dim('  queued') : '');
+    return lines.map((line, index) => `${index ? '  ' : accent('› ')}${messageText(line)}`).join('\n') + (queued ? '\n' + style.dim('  ↳ queued') : '');
   }
-  const heading = style.bold('poli:');
+  const heading = style.poliBrand();
   return [...wrapText(heading, width), ...wrapText(text, Math.max(1, width - 2)).map(line => '  ' + messageText(line))].join('\n');
 }
 
 export function toolActivity(name, args = {}) {
   if (!args || typeof args !== 'object') args = {};
-  const titles = { view_file: 'Read', list_dir: 'List', file_search: 'Find files', grep_search: 'Search', run_command: 'Run', edit_file: 'Edit', write_file: 'Write' };
+  const titles = { view_file: 'Reading', list_dir: 'Listing', file_search: 'Finding files for', grep_search: 'Searching', run_command: 'Running', edit_file: 'Editing', write_file: 'Writing' };
+  const safeName = plainText(name || 'tool');
   const target = args.command || args.file_path || args.dir_path || args.query || args.pattern || '';
-  return truncate(`${titles[name] || name}${target ? ' ' + target : ''}`, Math.max(4, terminalWidth() - 2));
+  return truncate(`${titles[safeName] || safeName}${target ? ' ' + plainText(target) : ''}`, Math.max(4, terminalWidth() - 2));
 }
 
 export function toolCard({ name, args = {}, status = 'running', result = null, elapsedMs = null }) {
   const width = terminalWidth();
-  const states = { success: ['[ok]', style.green], error: ['[err]', style.red], rejected: ['[skip]', style.yellow], running: ['[run]', accent] };
+  if (!args || typeof args !== 'object') args = {};
+  const states = { success: ['✓', style.green], error: ['×', style.red], rejected: ['!', style.yellow], running: ['◌', accent] };
   const [icon, color] = states[status] || ['·', style.dim];
+  const safeName = plainText(name || 'tool');
+  const target = plainText(args.command || args.file_path || args.dir_path || args.query || args.pattern || '');
+  const actions = {
+    view_file: 'Read',
+    list_dir: 'Listed',
+    file_search: 'Found',
+    grep_search: 'Searched',
+    run_command: 'Ran',
+    edit_file: 'Edited',
+    write_file: result?.created ? 'Created' : 'Wrote',
+  };
+  const action = `${actions[safeName] || safeName}${target ? ' ' + target : ''}`;
   const metrics = [];
   if (status === 'error') metrics.push('Failed');
   if (status === 'rejected') metrics.push('Declined');
@@ -324,20 +359,25 @@ export function toolCard({ name, args = {}, status = 'running', result = null, e
   if (result?.replacements_made != null) metrics.push(`${result.replacements_made} ${result.replacements_made === 1 ? 'change' : 'changes'}`);
   if (result?.exit_code) metrics.push(`Exit ${result.exit_code}`);
   if (elapsedMs != null) metrics.push(elapsedMs < 1000 ? `${elapsedMs}ms` : `${(elapsedMs / 1000).toFixed(1)}s`);
-  const explored = ['view_file', 'list_dir', 'grep_search', 'file_search'].includes(name) && status === 'success';
-  const activity = toolActivity(name, args).replace(/^Run /, 'Ran ').replace(/^Edit /, 'Edited ').replace(/^Write /, result?.created ? 'Created ' : 'Wrote ');
-  const rows = wrapText(`${color(icon)} ${style.bold(explored ? 'Explored' : activity)}${style.dim(metrics.length ? ' · ' + metrics.join(' · ') : '')}`, width);
-  if (explored) rows.push(...wrapText('  └ ' + toolActivity(name, args), width));
-  if (result?.diff_preview) rows.push(...plainText(result.diff_preview).split('\n').map(line => /\s− /.test(line) ? style.red(line) : /\s\+ /.test(line) ? style.green(line) : style.dim(line)));
+
+  const headline = `${color(icon)} ${style.bold(action)}${metrics.length ? style.dim('  ·  ' + metrics.join(' · ')) : ''}`;
+  const rows = wrapText(headline, width);
+  if (result?.diff_preview) {
+    for (const line of plainText(result.diff_preview).split('\n')) {
+      const styled = /\s− /.test(line) ? style.red(line) : /\s\+ /.test(line) ? style.green(line) : style.dim(line);
+      rows.push(...wrapText(styled, width));
+    }
+  }
   const detail = result?.error || (result?.rejected && result?.message);
   if (detail) rows.push(...wrapText(plainText(detail), Math.max(1, width - 4)).slice(0, 6).map(line => '    ' + color(line)));
-  if (result?.timed_out) rows.push('    ' + style.yellow('Command timed out.'));
-  if (result?.truncated) rows.push(...wrapText(name === 'view_file' ? 'More lines available.' : 'Output truncated · request a smaller range.', Math.max(1, width - 4)).map(line => '    ' + style.dim(line)));
+  if (result?.timed_out) rows.push(...wrapText('    Command timed out.', width).map(style.yellow));
+  if (result?.truncated) rows.push(...wrapText(`    ${name === 'view_file' ? 'More lines available.' : 'Output truncated · request a smaller range.'}`, width).map(style.dim));
+
   const output = result?.stderr || result?.stdout;
   if (output?.trim()) {
-    const lines = wrapText(plainText(output).trim(), Math.max(1, width - 4));
-    rows.push(...lines.slice(0, 4).map((line, index) => '  ' + (index === 0 ? '└ ' : '  ') + style.dim(line)));
-    if (lines.length > 4) rows.push(...wrapText(`    + ${lines.length - 4} more lines · Ctrl+T or /details`, Math.max(1, width)).map(style.dim));
+    const lines = plainText(output).trim().split('\n').flatMap(line => wrapText(line, Math.max(1, width - 4)));
+    rows.push(...lines.slice(0, 4).map((line, index) => `  ${index === 0 ? '└ ' : '  '}${style.dim(line)}`));
+    if (lines.length > 4) rows.push(...wrapText(`    + ${lines.length - 4} more lines · Ctrl+T or /details`, width).map(style.dim));
   }
-  return wrapText(rows.join('\n'), width).join('\n');
+  return rows.join('\n');
 }

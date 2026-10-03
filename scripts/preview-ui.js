@@ -11,7 +11,7 @@ console.log('\n' + banner({
   autoApprove: false,
 }));
 console.log('\n' + chatMessage('user', 'Make the onboarding easier to understand.') + '\n');
-console.log(style.bold('poli:'));
+console.log(style.poliBrand());
 console.log(renderMarkdown('I’ll simplify the first-run experience, keep the next action visible, and verify the change.\n\n1. Clarify the welcome screen.\n2. Make the first step obvious.\n3. Run the full test suite.'));
 console.log(toolCard({ name: 'view_file', args: { file_path: 'src/onboarding.js' }, status: 'success', result: { total_lines: 68 }, elapsedMs: 12 }));
 console.log(toolCard({ name: 'edit_file', args: { file_path: 'src/onboarding.js' }, status: 'success', result: { replacements_made: 1 }, elapsedMs: 142 }));

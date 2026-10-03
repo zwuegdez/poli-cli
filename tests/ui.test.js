@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { box, banner, cellWidth, stripAnsi, toolCard, truncateMiddle, wrapText } from '../src/ui/theme.js';
+import { box, banner, cellWidth, chatMessage, messageText, stripAnsi, toolCard, truncateMiddle, wrapText } from '../src/ui/theme.js';
 import { renderMarkdown, MarkdownStream } from '../src/ui/markdown.js';
 import { PromptManager, matchCommands } from '../src/ui/prompt.js';
 
@@ -51,6 +51,12 @@ test('welcome banner adapts without losing workspace and session context', () =>
       }
     }
   } finally { process.stdout.columns = previous; }
+});
+
+test('conversation styling reserves color for speaker cues, not every word', () => {
+  assert.equal(stripAnsi(chatMessage('user', 'Fix the failing test')), '› Fix the failing test');
+  assert.equal(messageText('A calm, readable answer.'), 'A calm, readable answer.');
+  assert.match(stripAnsi(chatMessage('assistant', 'A clear answer.')), /✦ poli\n  A clear answer\./);
 });
 
 test('Markdown retains link text, ordered lists, tables, and fenced code', () => {

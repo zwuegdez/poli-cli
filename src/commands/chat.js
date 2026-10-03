@@ -79,7 +79,7 @@ export async function cmdChat(initialPrompt = null, options = {}) {
       else session.messages.unshift({ role: 'system', content: currentPrompt });
       console.log(style.green(`Resumed ${session.id} · ${session.messages.filter(message => message.role === 'user').length} turns`));
       const last = session.messages.findLast(message => message.role === 'assistant' && message.content);
-      if (last) console.log(style.bold('poli:') + '\n' + renderMarkdown(String(last.content)) + '\n');
+      if (last) console.log(style.poliBrand() + '\n' + renderMarkdown(String(last.content)) + '\n');
       return true;
     } catch (error) { console.log(style.red(`Could not resume: ${error.message}`)); return false; }
   };

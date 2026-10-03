@@ -22,7 +22,7 @@ test('activity previews are bounded and details recover the complete tool output
   const stdout = Array.from({ length: 20 }, (_, i) => `output ${i}`).join('\n');
   const result = { stdout, exit_code: 0 };
   const card = stripAnsi(toolCard({ name: 'run_command', args: { command: 'npm test' }, result, status: 'success' }));
-  assert.match(card, /\[ok\] Ran npm test/);
+  assert.match(card, /✓ Ran npm test/);
   assert.match(card, /└ output 0/);
   assert.doesNotMatch(card, /output 19/);
   assert.match(card, /Ctrl\+T or \/details/);

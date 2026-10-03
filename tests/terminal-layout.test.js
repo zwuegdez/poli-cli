@@ -154,7 +154,7 @@ test('partial output and animated tool status never overwrite messages or drafts
     for (let i = 0; i < 10; i++) { spinner.frameIndex = i; spinner.render(); }
     await f.flush();
     const editableLine = f.lines().find(line => line.includes('follow-up draft'));
-    assert.ok(editableLine?.startsWith(' > follow-up draft'));
+    assert.ok(editableLine?.startsWith('› follow-up draft'));
     assert.ok(editableLine.includes('Running view_file'));
     f.output.write('MESSAGE_KEEP\n');
     f.output.write('UNTERMINATED_KEEP');

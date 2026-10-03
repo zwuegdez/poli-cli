@@ -99,3 +99,19 @@ test('internal tool blocks are filtered before highlighting even beside prose', 
   assert.doesNotMatch(child.stdout, /poli-tool|list_directory|arguments/);
   assert.doesNotMatch(child.stderr, /Could not find the language/);
 });
+
+test('Markdown tables align columns and become labeled rows on narrow terminals', () => {
+  const previous = process.stdout.columns;
+  try {
+    const table='| Name | Description |\n| --- | --- |\n| A | Short |\n| Longer | A detailed description |';
+    process.stdout.columns=80;
+    const wide=stripAnsi(renderMarkdown(table)).split('\n');
+    assert.equal(wide[0].indexOf('Description'),wide[1].indexOf('Short'));
+    process.stdout.columns=20;
+    const narrow=stripAnsi(renderMarkdown(table));
+    assert.match(narrow,/Name: A/);
+    assert.match(narrow,/Description:/);
+    assert.ok(narrow.split('\n').every(line=>cellWidth(line)<=20));
+    assert.doesNotMatch(narrow,/\[object Object\]|"header"/);
+  } finally { process.stdout.columns=previous; }
+});

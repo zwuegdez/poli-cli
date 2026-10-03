@@ -180,6 +180,20 @@ Activity rows use compact `[ok]`, `[err]`, and `[skip]` tags with indented resul
 red/green previews. Commands show a short output preview after completion; Ctrl+T or
 `/details` shows the latest completed tool result without submitting it to the model.
 Ctrl+T preserves the current draft, both during work and at the idle prompt.
+Use `/details 2` to inspect the second most recent tool result; `/details` and Ctrl+T
+show the latest result. Markdown tables align their columns on wide terminals and
+become labeled rows on narrow ones.
+
+### Resume a conversation
+
+`/resume` opens a searchable list of saved conversations for the current workspace.
+Use `/resume <id>` or `poli resume <id>` to choose one directly. Without an interactive
+terminal, `poli resume` lists the available IDs. Context and token usage are restored;
+the current model, mode, and approval settings still apply. Damaged session files and
+sessions from other workspaces are excluded. An interrupted tool batch gets explicit
+stopped results for unfinished calls; resuming never silently executes those calls.
+
+### Input and status
 Chat mode uses conversational welcome and input hints. While typing a long follow-up,
 the activity indicator contracts to a dot to leave more room for the message.
 Without an interactive terminal, changes requiring approval are declined unless `-y`

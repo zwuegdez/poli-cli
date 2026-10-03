@@ -140,3 +140,24 @@ test('queued steering waits until all tool results are recorded', () => {
       return {message:{content:'Updated'}};
     }}});await agent.runTurn('initial');assert.equal(requests,2);`);
 });
+
+test('null tool arguments become tool errors and keep conversation pairs intact', () => {
+  const output=scenario(`let requests=0;
+    const agent=new PoliAgent({session,config:{model:'test'},client:{async createChatCompletion(){
+      if(requests++===0)return {message:{tool_calls:[{id:'bad',function:{name:'list_dir',arguments:'null'}}]}};
+      assert.equal(messages.filter(m=>m.role==='tool').length,1);
+      assert.match(messages.at(-1).content,/must be an object/);
+      return {message:{content:'Recovered'}};
+    }}});await agent.runTurn('inspect');assert.equal(requests,2);`);
+  assert.match(output,/Recovered/);
+});
+test('empty tool results are reported as failures instead of successful actions', () => {
+  const output=scenario(`let requests=0;
+    const agent=new PoliAgent({session,config:{model:'test'},execute:async()=>null,client:{async createChatCompletion(){
+      if(requests++===0)return {message:{tool_calls:[{id:'empty',function:{name:'list_dir',arguments:'{}'}}]}};
+      assert.match(messages.at(-1).content,/Tool returned no result/);
+      return {message:{content:'Recovered'}};
+    }}});await agent.runTurn('inspect');`);
+  assert.match(output,/\[err\]/);
+  assert.doesNotMatch(output,/\[ok\]/);
+});

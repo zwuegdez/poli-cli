@@ -63,3 +63,11 @@ test('large replacement previews include both removed and added text', () => {
   assert.match(preview, /\+ new/);
   assert.ok(preview.split('\n').length <= 62);
 });
+
+test('older tool results can be selected and invalid selections are explained', () => {
+  const messages = [{role:'tool',name:'first',content:'{"stdout":"older output"}'},{role:'assistant',content:'done'},{role:'tool',name:'second',content:'{"stdout":"latest output"}'}];
+  assert.match(stripAnsi(toolDetails(messages, 2)), /older output/);
+  assert.doesNotMatch(stripAnsi(toolDetails(messages, 2)), /latest output/);
+  assert.match(stripAnsi(toolDetails(messages, 9)), /Only 2 tool results/);
+  assert.match(stripAnsi(toolDetails(messages, 0)), /Use \/details/);
+});

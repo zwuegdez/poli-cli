@@ -8,10 +8,12 @@ import { getSystemPrompt } from '../system-prompt.js';
 import { PromptManager, COMMAND_LIST } from '../ui/prompt.js';
 import { ALL_TOOLS } from '../tools/index.js';
 import { toolDetails } from '../ui/tool-details.js';
+import { renderMarkdown } from '../ui/markdown.js';
 import { banner, colors, style, section, chatMessage, wrapText, terminalWidth } from '../ui/theme.js';
 import { chooseModel } from './models.js';
 import { selectChoice } from '../ui/select.js';
 import { cmdConfig } from './config.js';
+import { chooseSession } from './resume.js';
 import { execSync } from 'node:child_process';
 
 export async function cmdChat(initialPrompt = null, options = {}) {
@@ -64,9 +66,27 @@ export async function cmdChat(initialPrompt = null, options = {}) {
     promptManager
   });
 
+  const resume = async id => {
+    try {
+      const selected = await chooseSession({ session, id });
+      if (!selected) return false;
+      // Validate before saving or replacing the current conversation.
+      Session.read(selected, workspaceDir);
+      if (session.messages.some(message => message.role === 'user')) session.save();
+      session.restore(selected);
+      const currentPrompt = getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode });
+      if (session.messages[0]?.role === 'system') session.messages[0].content = currentPrompt;
+      else session.messages.unshift({ role: 'system', content: currentPrompt });
+      console.log(style.green(`Resumed ${session.id} · ${session.messages.filter(message => message.role === 'user').length} turns`));
+      const last = session.messages.findLast(message => message.role === 'assistant' && message.content);
+      if (last) console.log(style.bold('poli:') + '\n' + renderMarkdown(String(last.content)) + '\n');
+      return true;
+    } catch (error) { console.log(style.red(`Could not resume: ${error.message}`)); return false; }
+  };
+
   // If one-shot prompt was provided via command line:
   if (initialPrompt && initialPrompt.trim()) {
-    process.stdout.write(`\n${colors.bold}${colors.brightCyan}✦ poli${colors.reset} ${colors.dim}› ${initialPrompt}${colors.reset}\n\n`);
+    process.stdout.write(chatMessage('user', initialPrompt.trim()) + '\n');
     const result = await agent.runTurn(initialPrompt.trim());
     return result.error ? 1 : result.cancelled ? 130 : 0;
   }
@@ -80,6 +100,8 @@ export async function cmdChat(initialPrompt = null, options = {}) {
     mode: config.mode,
     branch: gitBranch
   });
+
+  if (options.resume && !await resume(options.resume)) return options.resume === true ? 0 : 1;
 
   while (true) {
     const input = await promptManager.promptUser({
@@ -160,7 +182,12 @@ export async function cmdChat(initialPrompt = null, options = {}) {
       }
 
       if (rawCmd === '/details') {
-        process.stdout.write('\n' + toolDetails(session.messages) + '\n\n');
+        process.stdout.write('\n' + toolDetails(session.messages, arg ? Number(arg) : 1) + '\n\n');
+        continue;
+      }
+
+      if (rawCmd === '/resume') {
+        await resume(arg || true);
         continue;
       }
 

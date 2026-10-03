@@ -175,6 +175,7 @@ export class PoliAgent {
             finally { toolSpinner.stop(); }
           }
           actions++;
+          if (result == null) result = { error: 'Tool returned no result. Try the tool again with valid arguments.' };
           const status = result?.rejected ? 'rejected' : result?.error || result?.exit_code > 0 || result?.timed_out ? 'error' : 'success';
           process.stdout.write(`\n${toolCard({ name, args, status, result, elapsedMs: Date.now() - toolStart })}\n`);
           this.session.addMessage({ role: 'tool', tool_call_id: call.id, name, content: JSON.stringify(result ?? { error: 'Tool returned no result.' }) });

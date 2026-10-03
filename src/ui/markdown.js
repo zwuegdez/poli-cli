@@ -1,4 +1,4 @@
-import { colors, style, section, messageText, plainText, terminalWidth, wrapText } from './theme.js';
+import { colors, style, cellWidth, messageText, plainText, terminalWidth, wrapText } from './theme.js';
 import { marked } from 'marked';
 import { highlight, supportsLanguage } from 'cli-highlight';
 
@@ -43,9 +43,24 @@ renderer.list = (body, ordered, start = 1) => {
   }).join('') + '\n';
 };
 renderer.listitem = text => text + '\u0000';
-renderer.table = (header, body) => header + body + '\n';
-renderer.tablerow = content => content + '\n';
-renderer.tablecell = (content, { header }) => (header ? style.bold(content) : content) + '    ';
+renderer.tablecell = (content, { header }) => JSON.stringify({ text: content, header }) + '\u0000';
+renderer.tablerow = content => JSON.stringify(content.split('\u0000').filter(Boolean).map(cell => JSON.parse(cell))) + '\n';
+renderer.table = (header, body) => {
+  const rows = (header + body).trim().split('\n').map(row => JSON.parse(row));
+  const headings = rows[0] || [];
+  const width = terminalWidth();
+  const widths = headings.map((_, index) => Math.max(...rows.map(row => cellWidth(row[index]?.text || ''))));
+  if (widths.reduce((sum, size) => sum + size, 0) + Math.max(0, widths.length - 1) * 3 <= width) {
+    return rows.map(row => row.map((cell, index) => {
+      const text = cell.header ? style.bold(cell.text) : cell.text;
+      return text + ' '.repeat(Math.max(0, widths[index] - cellWidth(cell.text)));
+    }).join('   ').trimEnd()).join('\n') + '\n\n';
+  }
+  return rows.slice(1).map(row => row.map((cell, index) => {
+    const label = plainText(headings[index]?.text || `Column ${index + 1}`);
+    return wrapText(`${style.bold(label)}: ${cell.text}`, width).join('\n');
+  }).join('\n')).join('\n\n') + '\n\n';
+};
 
 export function renderMarkdown(markdown = '') {
   if (!markdown) return '';

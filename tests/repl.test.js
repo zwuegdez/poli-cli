@@ -60,3 +60,18 @@ test('one-shot failures return a failure exit code',async t=>{
   assert.equal(result.code,1);
   assert.match(result.stdout,/Unavailable/);
 });
+
+test('a conversation can be resumed across CLI processes without losing context', async t => {
+  const requests=[];
+  const cli=await fixture(t,(body,res)=>{requests.push(body);answer(res,'Saved answer');});
+  const first=await cli([],'original task\n');
+  assert.equal(first.code,0);
+  const listing=await cli([],'/resume\n');
+  const id=listing.stdout.match(/^([a-f0-9]{16})  /m)?.[1];
+  assert.ok(id,listing.stdout);
+  const resumed=await cli(['resume',id],'follow-up task\n');
+  assert.equal(resumed.code,0,resumed.stdout+resumed.stderr);
+  assert.match(resumed.stdout,/Resumed/);
+  assert.equal(requests.length,2);
+  assert.deepEqual(requests.at(-1).messages.filter(message=>message.role==='user').map(message=>message.content),['original task','follow-up task']);
+});

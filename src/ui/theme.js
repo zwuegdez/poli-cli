@@ -209,6 +209,7 @@ export function chatMessage(role, text, { queued = false } = {}) {
 }
 
 export function toolActivity(name, args = {}) {
+  if (!args || typeof args !== 'object') args = {};
   const titles = { view_file: 'Read', list_dir: 'List', file_search: 'Find files', grep_search: 'Search', run_command: 'Run', edit_file: 'Edit', write_file: 'Write' };
   const target = args.command || args.file_path || args.dir_path || args.query || args.pattern || '';
   return truncate(`${titles[name] || name}${target ? ' ' + target : ''}`, Math.max(4, terminalWidth() - 2));

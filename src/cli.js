@@ -24,6 +24,7 @@ export function printHelp() {
     'login         Sign in or configure an API key',
     'logout        Clear stored credentials',
     'models [name] Browse models or choose a default',
+    'resume [id]   Continue a saved conversation',
     'status        Check your connection',
     'config        View or update settings',
     '',
@@ -121,6 +122,8 @@ export async function runCli(argv = process.argv) {
       return await cmdStatus();
     case 'models':
       return await cmdModels(positional[1]);
+    case 'resume':
+      return await cmdChat(null, { resume: positional[1] || true, model: flags.model, mode: flags.mode, baseUrl: flags.baseUrl, yes: flags.yes });
     case 'config':
       return cmdConfig(positional[1], positional[2], positional[3]);
     case 'help':

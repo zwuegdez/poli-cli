@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { box, banner, cellWidth, stripAnsi, toolCard } from '../src/ui/theme.js';
+import { box, banner, cellWidth, stripAnsi, toolCard, truncateMiddle, wrapText } from '../src/ui/theme.js';
 import { renderMarkdown, MarkdownStream } from '../src/ui/markdown.js';
 import { PromptManager, matchCommands } from '../src/ui/prompt.js';
 
@@ -20,6 +20,39 @@ for (const width of [20, 40, 80, 120]) {
     } finally { process.stdout.columns = previous; }
   });
 }
+test('word wrapping keeps phrases together and avoids leading spaces on continuation lines', () => {
+  const text = 'The quick brown fox jumps over a lazy dog.';
+  const rows = wrapText(text, 16);
+  assert.ok(rows.every(line => cellWidth(line) <= 16));
+  assert.ok(rows.slice(1).every(line => !line.startsWith(' ')));
+  assert.equal(rows.join(' ').replace(/\s+/g, ' ').trim(), text);
+  const colored = wrapText('\x1b[32mThis is a long styled line\x1b[0m', 9);
+  assert.equal(colored.map(stripAnsi).join(' ').replace(/\s+/g, ' ').trim(), 'This is a long styled line');
+  const path = truncateMiddle('/really/long/workspace/project', 14);
+  assert.ok(cellWidth(path) <= 14);
+  assert.ok(path.startsWith('/really'));
+  assert.ok(path.endsWith('roject'));
+});
+
+test('welcome banner adapts without losing workspace and session context', () => {
+  const previous = process.stdout.columns;
+  try {
+    for (const width of [8, 20, 40, 80]) {
+      process.stdout.columns = width;
+      const output = banner({ cwd: '/home/dev/work/project', branch: 'feature/accessible-cli', model: 'custom-model', mode: 'chat' });
+      assert.ok(output.split('\n').every(line => cellWidth(line) <= width), output);
+      if (width === 20) {
+        const plain = stripAnsi(output);
+        assert.match(plain, /workspace|dir/);
+        assert.match(plain, /chat/);
+        assert.match(plain, /git/);
+        assert.match(plain, /approvals/);
+        assert.match(plain, /custom/);
+      }
+    }
+  } finally { process.stdout.columns = previous; }
+});
+
 test('Markdown retains link text, ordered lists, tables, and fenced code', () => {
   const result = stripAnsi(renderMarkdown('## Plan\n\n1. First\n2. Second\n\n[Docs](https://example.test)\n\n| Name | Value |\n| --- | --- |\n| hello | 42 |\n\n```js\nconst x = 1;\n```'));
   assert.match(result, /1\. First/);
@@ -28,6 +61,8 @@ test('Markdown retains link text, ordered lists, tables, and fenced code', () =>
   assert.match(result, /hello/);
   assert.match(result, /42/);
   assert.match(result, /const x = 1;/);
+  assert.match(result, /code · js/);
+  assert.match(result, /│ const x = 1;/);
   assert.doesNotMatch(result, /<td>|undefined|\[object Object\]/);
 });
 test('streaming across arbitrary chunks emits each complete block once', () => {

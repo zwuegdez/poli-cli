@@ -60,9 +60,12 @@ else
   echo -e "${CYAN}•${RESET} Cloning poli-cli into ${DIM}$INSTALL_DIR${RESET}..."
   mkdir -p "$INSTALL_DIR"
   git clone --quiet --depth 1 "$REPO_URL" "$INSTALL_DIR"
+  cd "$INSTALL_DIR"
 fi
 
-cd "$INSTALL_DIR"
+echo -e "${CYAN}•${RESET} Installing runtime dependencies..."
+npm install --omit=dev --silent
+
 chmod +x bin/poli.js
 
 # 3. Create global symlinks (poli and poli-cli)

@@ -48,6 +48,21 @@ export const colors = {
   bgRgb: (r, g, b) => isTrueColorSupported ? `\x1b[48;2;${r};${g};${b}m` : ''
 };
 
+export function gradientText(text, colorStart, colorEnd) {
+  if (!isTrueColorSupported) return `${colors.brightCyan}${text}${colors.reset}`;
+  const rStep = (colorEnd[0] - colorStart[0]) / Math.max(1, text.length - 1);
+  const gStep = (colorEnd[1] - colorStart[1]) / Math.max(1, text.length - 1);
+  const bStep = (colorEnd[2] - colorStart[2]) / Math.max(1, text.length - 1);
+  let res = '';
+  for (let i = 0; i < text.length; i++) {
+    const r = Math.round(colorStart[0] + rStep * i);
+    const g = Math.round(colorStart[1] + gStep * i);
+    const b = Math.round(colorStart[2] + bStep * i);
+    res += `\x1b[38;2;${r};${g};${b}m${text[i]}`;
+  }
+  return res + colors.reset;
+}
+
 export const style = {
   bold: (t) => `${colors.bold}${t}${colors.reset}`,
   dim: (t) => `${colors.dim}${t}${colors.reset}`,
@@ -77,7 +92,7 @@ export const style = {
     `${colors.dim}[${colors.reset}${color}${text}${colors.reset}${colors.dim}]${colors.reset}`,
 
   poliBrand: () =>
-    `${colors.bold}${colors.brightCyan}✦ POLI${colors.reset}${colors.bold}${colors.brightMagenta}-CLI${colors.reset}`,
+    colors.bold + gradientText('✦ POLI-CLI', [0, 255, 255], [255, 0, 255]),
 };
 
 export const symbols = {
@@ -124,11 +139,11 @@ export function banner(info = {}) {
   const branchDisplay = branch ? ` ${colors.dim}git:(${colors.cyan}${branch}${colors.dim})${colors.reset}` : '';
 
   const lines = [
-    `${colors.brightCyan}╭${border}╮${colors.reset}`,
-    `${colors.brightCyan}│${colors.reset}  ${style.poliBrand()} ${colors.dim}v${version}${colors.reset}  ${colors.dim}•  Agentic AI Coding Assistant powered by ${colors.brightMagenta}${proxy}${colors.reset}${' '.repeat(Math.max(0, width - 67 - proxy.length - version.length))}${colors.brightCyan}│${colors.reset}`,
-    `${colors.brightCyan}│${colors.reset}  ${colors.dim}Model:${colors.reset} ${colors.brightGreen}${model}${colors.reset}  ${colors.dim}│${colors.reset}  ${colors.dim}Status:${colors.reset} ${colors.green}● ${status}${colors.reset}  ${colors.dim}│${colors.reset}  ${colors.dim}Type ${colors.yellow}/${colors.reset} ${colors.dim}or ${colors.yellow}/help${colors.reset} ${colors.dim}to show commands${colors.reset}${' '.repeat(Math.max(0, width - 69 - model.length - status.length))}${colors.brightCyan}│${colors.reset}`,
-    `${colors.brightCyan}│${colors.reset}  ${colors.dim}Dir:${colors.reset}   ${colors.gray}${workspaceDisplay}${colors.reset}${branchDisplay}${' '.repeat(Math.max(0, width - 11 - workspaceDisplay.length - (branch ? branch.length + 8 : 0)))}${colors.brightCyan}│${colors.reset}`,
-    `${colors.brightCyan}╰${border}╯${colors.reset}`,
+    `${colors.dim}╭${border}╮${colors.reset}`,
+    `${colors.dim}│${colors.reset}  ${style.poliBrand()} ${colors.dim}v${version}${colors.reset}  ${colors.dim}•  Agentic AI Coding Assistant powered by ${colors.brightMagenta}${proxy}${colors.reset}${' '.repeat(Math.max(0, width - 67 - proxy.length - version.length))}${colors.dim}│${colors.reset}`,
+    `${colors.dim}│${colors.reset}  ${colors.dim}Model:${colors.reset} ${colors.brightGreen}${model}${colors.reset}  ${colors.dim}│${colors.reset}  ${colors.dim}Status:${colors.reset} ${colors.green}● ${status}${colors.reset}  ${colors.dim}│${colors.reset}  ${colors.dim}Type ${colors.yellow}/${colors.reset} ${colors.dim}or ${colors.yellow}/help${colors.reset} ${colors.dim}to show commands${colors.reset}${' '.repeat(Math.max(0, width - 69 - model.length - status.length))}${colors.dim}│${colors.reset}`,
+    `${colors.dim}│${colors.reset}  ${colors.dim}Dir:${colors.reset}   ${colors.gray}${workspaceDisplay}${colors.reset}${branchDisplay}${' '.repeat(Math.max(0, width - 11 - workspaceDisplay.length - (branch ? branch.length + 8 : 0)))}${colors.dim}│${colors.reset}`,
+    `${colors.dim}╰${border}╯${colors.reset}`,
   ];
 
   return lines.join('\n');
@@ -136,23 +151,38 @@ export function banner(info = {}) {
 
 export function box(title, content, options = {}) {
   const width = Math.min(process.stdout.columns || 80, 80);
-  const h = '─';
-  const v = '│';
+  const { borderColor = colors.dim, padding = 1, style = 'rounded' } = options;
+  
+  const chars = style === 'rounded' 
+    ? { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' }
+    : { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' };
 
   const cleanTitle = title ? ` ${title} ` : '';
-  const topBorder = `╭─${cleanTitle}${h.repeat(Math.max(0, width - cleanTitle.length - 3))}╮`;
-  const bottomBorder = `╰${h.repeat(Math.max(0, width - 2))}╯`;
+  const titleFormatted = title ? `${colors.bold}${gradientText(title, [0,255,255], [100,100,255])}${colors.reset}` : '';
+  const topBorderRaw = `${chars.tl}${chars.h}${cleanTitle}${chars.h.repeat(Math.max(0, width - cleanTitle.length - 3))}${chars.tr}`;
+  
+  // Need to place formatted title in the raw border
+  const topBorder = title 
+    ? `${borderColor}${chars.tl}${chars.h}${colors.reset}${titleFormatted}${borderColor}${chars.h.repeat(Math.max(0, width - cleanTitle.length - 3))}${chars.tr}${colors.reset}`
+    : `${borderColor}${chars.tl}${chars.h.repeat(Math.max(0, width - 2))}${chars.tr}${colors.reset}`;
+
+  const bottomBorder = `${borderColor}${chars.bl}${chars.h.repeat(Math.max(0, width - 2))}${chars.br}${colors.reset}`;
 
   const contentLines = content.split('\n');
-  const innerLines = contentLines.map(line => `${v} ${line}`);
+  const innerLines = contentLines.map(line => {
+    // strip ansi for length calculation? We'll just assume it fits or is pre-wrapped
+    return `${borderColor}${chars.v}${colors.reset}${' '.repeat(padding)}${line}`;
+  });
 
-  const borderColor = options.borderColor || colors.cyan;
+  const padLine = `${borderColor}${chars.v}${colors.reset}`;
 
-  return [
-    borderColor + topBorder + colors.reset,
-    ...innerLines,
-    borderColor + bottomBorder + colors.reset
-  ].join('\n');
+  const finalLines = [topBorder];
+  for(let i=0; i<padding; i++) finalLines.push(padLine);
+  finalLines.push(...innerLines);
+  for(let i=0; i<padding; i++) finalLines.push(padLine);
+  finalLines.push(bottomBorder);
+
+  return finalLines.join('\n');
 }
 
 export function toolCard({ name, args = {}, status = 'running', result = null, elapsedMs = null }) {
@@ -161,23 +191,26 @@ export function toolCard({ name, args = {}, status = 'running', result = null, e
   const v = '│';
 
   const statusBadge = status === 'success'
-    ? `${colors.green}${symbols.check} success${colors.reset}`
+    ? `${colors.bgGreen}${colors.black} ${symbols.check} SUCCESS ${colors.reset}`
     : (status === 'error'
-      ? `${colors.red}${symbols.cross} error${colors.reset}`
-      : `${colors.yellow}running${colors.reset}`);
+      ? `${colors.bgRed}${colors.white} ${symbols.cross} ERROR ${colors.reset}`
+      : `${colors.bgYellow}${colors.black} ⚡ RUNNING ${colors.reset}`);
 
   const timeStr = elapsedMs != null ? ` ${colors.dim}(${elapsedMs}ms)${colors.reset}` : '';
   const title = ` ${symbols.tool} ${name} `;
-  const topBorder = `╭─${colors.bold}${colors.brightMagenta}${title}${colors.reset}${colors.dim}${h.repeat(Math.max(0, width - title.length - 3))}╮${colors.reset}`;
-  const bottomBorder = `╰${colors.dim}${h.repeat(Math.max(0, width - 2))}╯${colors.reset}`;
+  
+  const bColor = status === 'running' ? colors.yellow : (status === 'error' ? colors.red : colors.dim);
+
+  const topBorder = `${bColor}╭─${colors.reset}${colors.bold}${colors.brightMagenta}${title}${colors.reset}${bColor}${h.repeat(Math.max(0, width - title.length - 3))}╮${colors.reset}`;
+  const bottomBorder = `${bColor}╰${h.repeat(Math.max(0, width - 2))}╯${colors.reset}`;
 
   const argPairs = Object.entries(args)
     .map(([k, v]) => `  ${colors.dim}${k}:${colors.reset} ${typeof v === 'string' ? (v.length > 50 ? v.slice(0, 47) + '...' : v) : JSON.stringify(v)}`);
 
   return [
     topBorder,
-    `${v}  ${colors.dim}Status:${colors.reset} ${statusBadge}${timeStr}`,
-    ...argPairs.map(l => `${v}${l}`),
+    `${bColor}${v}${colors.reset}  ${statusBadge}${timeStr}`,
+    ...argPairs.map(l => `${bColor}${v}${colors.reset}${l}`),
     bottomBorder
   ].join('\n');
 }

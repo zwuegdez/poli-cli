@@ -28,5 +28,9 @@
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "cli-highlight": "^2.1.11",
+    "marked": "^12.0.2"
   }
 }

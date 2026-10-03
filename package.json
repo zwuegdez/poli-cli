@@ -1,0 +1,30 @@
+{
+  "name": "poli-code",
+  "version": "1.0.0",
+  "description": "Next-generation agentic AI coding CLI powered by poli-proxy",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "poli": "./bin/poli.js",
+    "poli-code": "./bin/poli.js"
+  },
+  "scripts": {
+    "start": "node bin/poli.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "ai",
+    "coding-assistant",
+    "cli",
+    "agent",
+    "poli-proxy",
+    "codex",
+    "claude-code",
+    "antigravity"
+  ],
+  "author": "poliai",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

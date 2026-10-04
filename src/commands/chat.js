@@ -235,10 +235,10 @@ export async function cmdChat(initialPrompt = null, options = {}) {
     }
 
     // Render user input card
-    renderUserCard(trimmed);
+    renderUserCard(input);
 
     // Agent turn
-    await agent.runTurn(trimmed);
+    await agent.runTurn(input);
   }
 
   return 0;

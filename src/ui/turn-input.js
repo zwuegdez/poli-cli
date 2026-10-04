@@ -1,4 +1,5 @@
 import readline from 'node:readline';
+import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
 import { accent, messageText, cellWidth, style, truncate, symbols } from './theme.js';
 
 // Keep one editable line after the transcript. Use normal terminal scrolling so
@@ -11,6 +12,7 @@ export class TurnInput {
     this.cursor = 0;
     this.active = false;
     this.notice = '';
+    this.viewStart = 0;
     this.pasting = false;
     this.paste = '';
     this.onKey = this.onKey.bind(this);
@@ -64,17 +66,17 @@ export class TurnInput {
     const statusWidth = this.notice ? 0 : Math.min(cellWidth(status), Math.max(0, Math.min(32, Math.floor(width / 2) - 2)));
     const prompt = '› ';
     const promptWidth = cellWidth(prompt);
-    const available = Math.max(1, width - promptWidth - (statusWidth ? statusWidth + 2 : 0));
-    let start = this.cursor, used = 0;
-    while (start && used + cellWidth(this.buffer[start - 1]) < available) used += cellWidth(this.buffer[--start]);
-    const value = truncate(this.buffer.slice(start).join(''), available);
+    const available = Math.max(1, width - promptWidth - 2 - (statusWidth ? statusWidth + 2 : 0));
+    const view = inputViewport(this.buffer, this.cursor, available, this.viewStart);
+    this.viewStart = view.start;
+    const value = view.text;
     this.clear();
     const placeholder = this.notice || 'Type a follow-up…';
     this.rawWrite(`${accent(prompt)}${this.buffer.length ? messageText(value) : style.dim(truncate(placeholder, available))}`);
     if (statusWidth) {
       this.rawWrite(`\r\x1b[${width - statusWidth - 2}C${this.activity ? accent(truncate(status, statusWidth)) : style.dim(truncate(status, statusWidth))}`);
     }
-    this.rawWrite(`\r\x1b[${promptWidth + cellWidth(this.buffer.slice(start, this.cursor).join(''))}C`);
+    this.rawWrite(`\r\x1b[${promptWidth + view.cursorColumn}C`);
   }
   setActivity(text, frame = 0, elapsed = '') {
     if (text && text !== this.activity && !this.queue.length) this.notice = '';
@@ -91,9 +93,9 @@ export class TurnInput {
     this.draw();
   }
   insert(text) {
-    const chars = Array.from(text.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').replace(/[\r\n]+/g, ' '));
-    this.buffer.splice(this.cursor, 0, ...chars);
-    this.cursor += chars.length;
+    const left = this.buffer.slice(0, this.cursor).join('') + normalizeInput(text);
+    this.buffer = splitInput(left + this.buffer.slice(this.cursor).join(''));
+    this.cursor = splitInput(left).length;
     this.notice = '';
   }
   onKey(text, key = {}) {
@@ -102,19 +104,21 @@ export class TurnInput {
     if (this.pasting) { this.paste += text || key.sequence || ''; return; }
     if (key.ctrl && key.name === 't') { this.onDetails?.(); return; }
     if (key.name === 'escape' || key.ctrl && key.name === 'c') { this.controller.abort(); return; }
+    if (key.sequence === '\n' || key.ctrl && key.name === 'j' || (key.name === 'return' || key.name === 'enter') && (key.shift || key.meta)) { this.insert('\n'); this.draw(); return; }
     if (key.name === 'return' || key.name === 'enter') {
-      const message = this.buffer.join('').trim();
-      if (message) {
+      const message = this.buffer.join('');
+      if (message.trim()) {
         this.queue.push(message);
         this.onSubmit?.(message);
         this.notice = `Queued (${this.queue.length}): ${message}`;
         this.buffer = [];
         this.cursor = 0;
       }
-    } else if (key.name === 'left') this.cursor = Math.max(0, this.cursor - 1);
-    else if (key.name === 'right') this.cursor = Math.min(this.buffer.length, this.cursor + 1);
+    } else if (key.name === 'left') this.cursor = key.ctrl || key.meta ? wordBoundary(this.buffer, this.cursor, -1) : Math.max(0, this.cursor - 1);
+    else if (key.name === 'right') this.cursor = key.ctrl || key.meta ? wordBoundary(this.buffer, this.cursor, 1) : Math.min(this.buffer.length, this.cursor + 1);
     else if (key.name === 'home' || key.ctrl && key.name === 'a') this.cursor = 0;
     else if (key.name === 'end' || key.ctrl && key.name === 'e') this.cursor = this.buffer.length;
+    else if (key.ctrl && key.name === 'w' || key.meta && key.name === 'backspace') { const start = wordBoundary(this.buffer, this.cursor, -1); this.buffer.splice(start, this.cursor - start); this.cursor = start; }
     else if (key.name === 'backspace' && this.cursor) this.buffer.splice(--this.cursor, 1);
     else if (key.name === 'delete') this.buffer.splice(this.cursor, 1);
     else if (key.ctrl && key.name === 'u') { this.buffer.splice(0, this.cursor); this.cursor = 0; }

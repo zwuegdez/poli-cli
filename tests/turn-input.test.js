@@ -52,7 +52,7 @@ test('pasted multiline follow-ups are queued as one message', () => {
     f.composer.onKey('first\nsecond', {});
     f.composer.onKey(null, { sequence: '\x1b[201~' });
     f.composer.onKey(null, { name: 'return' });
-    assert.deepEqual(f.composer.drain(), ['first second']);
+    assert.deepEqual(f.composer.drain(), ['first\nsecond']);
   } finally { f.composer.close(); }
 });
 
@@ -69,4 +69,20 @@ test('Ctrl+T opens tool details while preserving the draft and running turn', ()
     assert.equal(f.controller.signal.aborted, false);
     assert.match(f.printed(), /Tool details/);
   } finally { f.composer.close(); }
+});
+
+test('newline shortcuts, word deletion, and emoji editing preserve the queued text', () => {
+  const f=fixture();f.composer.start();
+  try {
+    f.composer.onKey('  first',{});
+    f.composer.onKey('\n',{sequence:'\n',name:'enter'});
+    f.composer.onKey('    👩‍💻 extra',{});
+    f.composer.onKey(null,{ctrl:true,name:'w'});
+    f.composer.onKey(null,{name:'backspace'});
+    assert.equal(f.composer.draft(),'  first\n    👩‍💻');
+    f.composer.onKey(null,{name:'backspace'});
+    assert.equal(f.composer.draft(),'  first\n    ');
+    f.composer.onKey('\r',{name:'return'});
+    assert.deepEqual(f.composer.drain(),['  first\n    ']);
+  } finally {f.composer.close();}
 });

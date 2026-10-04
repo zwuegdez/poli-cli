@@ -144,9 +144,16 @@ The preview shows the welcome screen, conversation, tool result, and code block.
 In a terminal, try `/`, arrow keys, Tab, or pasting text. Enter closes the preview.
 Use `FORCE_COLOR=1` to force ANSI color, or `NO_COLOR=1` for plain output.
 
+Enter sends a message; Ctrl+J inserts a newline. Shift+Enter or Alt+Enter also inserts
+a newline when supported by your terminal. Multiline paste preserves line breaks and
+indentation in one message, displayed with `↵` markers in the editable row. Long drafts
+scroll horizontally with `‹` / `›` markers, and history recalls multiline messages intact.
+
 Input shortcuts: Home / Ctrl+A, End / Ctrl+E, Ctrl+U to clear before the cursor,
-and Ctrl+K to clear after it. Ctrl+C clears the draft; on an empty draft it exits.
-Multiline paste is combined into one task. Enter on a command with required arguments
+and Ctrl+K to clear after it. Ctrl/Alt+Left and Right move by word; Ctrl+W or
+Alt+Backspace deletes the previous word. Emoji and combined characters are edited
+as whole characters. Ctrl+C clears the idle draft; on an empty draft it exits.
+Enter on a command with required arguments
 fills the command first. `/models` opens the model picker without typing a model name.
 
 ### Conversation and agent execution

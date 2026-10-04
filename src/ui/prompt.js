@@ -2,6 +2,7 @@
 import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
+import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
 import { colors, style, accent, messageText, cellWidth, truncate, terminalWidth } from './theme.js';
 
 export const COMMAND_LIST = [
@@ -44,7 +45,12 @@ export class PromptManager {
       if (fs.existsSync(this.historyFile)) {
         const lines = fs.readFileSync(this.historyFile, 'utf8')
           .split('\n')
-          .map(l => l.trim())
+          .map(line => {
+            if (line.startsWith('@poli-v1 ')) {
+              try { const text = JSON.parse(line.slice(9)); if (typeof text === 'string') return text; } catch {}
+            }
+            return line.trim();
+          })
           .filter(Boolean);
         this.history = lines.slice(-200);
       }
@@ -60,7 +66,7 @@ export class PromptManager {
     try {
       const dir = path.dirname(this.historyFile);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.appendFileSync(this.historyFile, line + '\n', 'utf8');
+      fs.appendFileSync(this.historyFile, '@poli-v1 ' + JSON.stringify(line) + '\n', 'utf8');
 
     } catch {}
   }
@@ -87,9 +93,9 @@ export class PromptManager {
       readline.emitKeypressEvents(stdin);
       stdin.setRawMode(true);
       stdin.resume();
-      let buffer = Array.from(this.draft || ''), cursor = buffer.length, selected = 0, menuLines = 0, dismissed = false;
+      let buffer = splitInput(this.draft || ''), cursor = buffer.length, selected = 0, menuLines = 0, dismissed = false;
       this.draft = '';
-      let draft = [], pasting = false, paste = '';
+      let draft = [], pasting = false, paste = '', viewStart = 0;
       this.historyIndex = -1;
       const text = () => buffer.join('');
       const matches = () => dismissed ? [] : matchCommands(text());
@@ -104,18 +110,26 @@ export class PromptManager {
         clearMenu();
         readline.cursorTo(stdout, 0);
         readline.clearLine(stdout, 0);
+        const width = Math.max(8, stdout.columns || 80);
         const prompt = '› ';
         const promptWidth = cellWidth(prompt);
-        const available = Math.max(1, terminalWidth() - promptWidth - 1);
-        let start = cursor;
-        let used = 0;
-        while (start > 0 && used + cellWidth(buffer[start - 1]) < available) used += cellWidth(buffer[--start]);
-        const visible = truncate(buffer.slice(start).join(''), available);
+        const available = width - promptWidth - 2;
+        const view = inputViewport(buffer, cursor, available, viewStart);
+        viewStart = view.start;
+        const visible = view.text;
         const items = matches();
         selected = items.length ? (selected + items.length) % items.length : 0;
         const placeholder = mode === 'chat' ? 'Message poli… · / commands' : 'Describe a task or ask… · / commands';
         stdout.write(accent(prompt) + (buffer.length ? messageText(visible) : style.dim(truncate(placeholder, available))));
-        const cursorColumn = promptWidth + cellWidth(buffer.slice(start, cursor).join(''));
+        const cursorColumn = promptWidth + view.cursorColumn;
+        if (!items.length) {
+          const hint = view.lines > 1 ? `${view.lines} lines · Enter send` : 'Enter send · Ctrl+J newline';
+          const bodyWidth = cellWidth(buffer.length ? visible : truncate(placeholder, available));
+          if (bodyWidth + cellWidth(hint) + 8 < width) {
+            readline.cursorTo(stdout, width - cellWidth(hint) - 2);
+            stdout.write(style.dim(hint));
+          }
+        }
         if (items.length) {
           const count = Math.min(items.length, Math.max(1, Math.min(6, (stdout.rows || 24) - 8)));
           const offset = Math.max(0, Math.min(selected - count + 1, items.length - count));
@@ -150,27 +164,28 @@ export class PromptManager {
         resolve(value);
       };
       const insert = (value) => {
-        const chars = Array.from(value.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ''));
-        buffer.splice(cursor, 0, ...chars);
-        cursor += chars.length;
+        const left = buffer.slice(0, cursor).join('') + normalizeInput(value);
+        buffer = splitInput(left + buffer.slice(cursor).join(''));
+        cursor = splitInput(left).length;
         selected = 0; dismissed = false;
       };
       const onEnd = () => finish('/exit');
       const onKey = (str, key = {}) => {
         if (key.sequence === '\x1b[200~') { pasting = true; paste = ''; return; }
-        if (key.sequence === '\x1b[201~') { pasting = false; insert(paste.replace(/[\r\n]+/g, ' ')); render(); return; }
+        if (key.sequence === '\x1b[201~') { pasting = false; insert(paste); render(); return; }
         if (pasting) { paste += str || key.sequence || ''; return; }
         if (key.ctrl && key.name === 't') { this.draft = text(); finish('/details'); return; }
         if (key.ctrl && key.name === 'c') { if (buffer.length) { buffer = []; cursor = 0; dismissed = false; } else { finish('/exit'); return; } }
         else if (key.ctrl && key.name === 'd' && !buffer.length) { finish('/exit'); return; }
+        else if (key.sequence === '\n' || key.ctrl && key.name === 'j' || (key.name === 'return' || key.name === 'enter') && (key.shift || key.meta)) insert('\n');
         else if (key.name === 'return' || key.name === 'enter') {
           const item = matches()[selected];
-          if (item && item.args.startsWith('<')) { buffer = Array.from(item.cmd + ' '); cursor = buffer.length; }
-          else { finish(item ? item.cmd : text().trim()); return; }
+          if (item && item.args.startsWith('<')) { buffer = splitInput(item.cmd + ' '); cursor = buffer.length; }
+          else { finish(item ? item.cmd : text()); return; }
         }
         else if (key.name === 'tab') {
           const item = matches()[selected];
-          if (item) { buffer = Array.from(item.cmd + (item.args ? ' ' : '')); cursor = buffer.length; dismissed = true; }
+          if (item) { buffer = splitInput(item.cmd + (item.args ? ' ' : '')); cursor = buffer.length; dismissed = true; }
         }
         else if (key.name === 'escape') dismissed = true;
         else if (key.name === 'up' || key.name === 'down') {
@@ -179,15 +194,16 @@ export class PromptManager {
             if (this.historyIndex === -1) draft = [...buffer];
             if (key.name === 'up') this.historyIndex = this.historyIndex === -1 ? this.history.length - 1 : Math.max(0, this.historyIndex - 1);
             else if (this.historyIndex !== -1) this.historyIndex = this.historyIndex + 1 >= this.history.length ? -1 : this.historyIndex + 1;
-            buffer = this.historyIndex === -1 ? [...draft] : Array.from(this.history[this.historyIndex] || ''); cursor = buffer.length;
+            buffer = this.historyIndex === -1 ? [...draft] : splitInput(this.history[this.historyIndex] || ''); cursor = buffer.length;
           }
         }
-        else if (key.name === 'left') cursor = Math.max(0, cursor - 1);
-        else if (key.name === 'right') cursor = Math.min(buffer.length, cursor + 1);
+        else if (key.name === 'left') cursor = key.ctrl || key.meta ? wordBoundary(buffer, cursor, -1) : Math.max(0, cursor - 1);
+        else if (key.name === 'right') cursor = key.ctrl || key.meta ? wordBoundary(buffer, cursor, 1) : Math.min(buffer.length, cursor + 1);
         else if (key.name === 'home' || key.ctrl && key.name === 'a') cursor = 0;
         else if (key.name === 'end' || key.ctrl && key.name === 'e') cursor = buffer.length;
         else if (key.ctrl && key.name === 'u') { buffer.splice(0, cursor); cursor = 0; }
         else if (key.ctrl && key.name === 'k') buffer.splice(cursor);
+        else if (key.ctrl && key.name === 'w' || key.meta && key.name === 'backspace') { const start = wordBoundary(buffer, cursor, -1); buffer.splice(start, cursor - start); cursor = start; }
         else if (key.name === 'backspace') { if (cursor) buffer.splice(--cursor, 1); selected = 0; dismissed = false; }
         else if (key.name === 'delete') buffer.splice(cursor, 1);
         else if (str && !key.ctrl && !key.meta) insert(str.replace(/[\r\n]/g, ' '));

@@ -204,14 +204,14 @@ sessions from other workspaces are excluded. An interrupted tool batch gets expl
 stopped results for unfinished calls; resuming never silently executes those calls.
 
 ### Input and status
-Idle and working input share the same borderless composer: a full-width dark green
-writing surface with bright green text and `Ask Poli anything…` as its placeholder.
-The model, mode, multiline count, and keyboard hints sit below the writing surface.
-During work, three green dots animate above it beside the current action and elapsed
-time. Animation leaves the draft steady. Enter queues a message and the footer shows
-the queue count; Esc stops the current response. Slash suggestions open below the
-composer. All rows use normal terminal scrollback and adapt when a mobile keyboard
-changes the window size. `NO_COLOR=1` keeps the same layout without color.
+Idle and working input use one borderless writing row with bright green text and
+`Write a message…` as its placeholder. During work, a small green dot pulses beside
+the prompt; only the dot is repainted as it animates. Model and mode are shown in the
+welcome screen and available through `/status`. Enter queues a follow-up during work,
+and the empty input shows the queue count. Ctrl+J inserts a newline and Esc stops the
+current response. Slash suggestions appear beneath the writing row when requested.
+The input has no background bar or permanent footer rows, and uses normal terminal
+scrollback. `NO_COLOR=1` keeps the same layout without color.
 Without an interactive terminal, changes requiring approval are declined unless `-y`
 is supplied. Requests time out after 120 seconds by default; configure
 `requestTimeoutMs` if your model needs more time. Shell commands default to 120 seconds;

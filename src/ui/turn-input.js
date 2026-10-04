@@ -1,9 +1,8 @@
 import readline from 'node:readline';
-import { ComposerView, inputBand, composerMeta } from './composer-view.js';
+import { ComposerView, inputLine } from './composer-view.js';
 import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
-import { accent, truncate } from './theme.js';
 
-// Keep a compact activity row above the editable line. Use normal scrolling so
+// Keep one editable row after the transcript. Use normal scrolling so
 // every completed output line enters native scrollback; never set scroll margins.
 export class TurnInput {
   constructor({ controller, onSubmit, onDetails, model = 'poli', mode = 'agent', input = process.stdin, output = process.stdout, error = process.stderr }) {
@@ -60,15 +59,11 @@ export class TurnInput {
   draw() {
     if (!this.active) return;
     const width = Math.max(8, this.output.columns || 80);
-    const frames = ['● · ·', '· ● ·', '· · ●', '· ● ·'];
-    const frame = frames[Math.floor((this.frameIndex || 0) / 2) % frames.length];
-    const activity = (this.activity || 'Working').replace(/…$/, '');
-    const status = accent(truncate(`${frame} ${activity}${this.elapsed ? ' · ' + this.elapsed : ''}`, width - 1));
-    const input = inputViewport(this.buffer, this.cursor, width - 4, this.viewStart);
+    const input = inputViewport(this.buffer, this.cursor, width - 6, this.viewStart);
     this.viewStart = input.start;
-    const placeholder = this.notice ? 'Message queued. Write another…' : 'Ask Poli anything…';
-    const rows = [status, inputBand(this.buffer.length ? input.text : placeholder, width, { placeholder: !this.buffer.length }), composerMeta({model: this.model, mode: this.mode, width, working: true, queued: this.queue.length, lines: input.lines})];
-    this.view.paint(rows, 1, 2 + input.cursorColumn);
+    const placeholder = this.queue.length ? `${this.queue.length} queued · Write another…` : 'Write a message…';
+    const line = inputLine(this.buffer.length ? input.text : placeholder, width, {placeholder: !this.buffer.length, working: true, frame: this.frameIndex || 0});
+    this.view.paint([line.row], 0, 4 + input.cursorColumn, line);
   }
   setActivity(text, frame = 0, elapsed = '') {
     if (text && text !== this.activity && !this.queue.length) this.notice = '';

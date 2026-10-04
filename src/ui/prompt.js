@@ -1,6 +1,6 @@
 // Interactive Prompt and Readline Manager with Codex-style "/" command menu
 import readline from 'node:readline';
-import { ComposerView, inputBand, composerMeta } from './composer-view.js';
+import { ComposerView, inputLine } from './composer-view.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
@@ -103,11 +103,12 @@ export class PromptManager {
       const view = new ComposerView(stdout, value => stdout.write(value));
       const render = () => {
         const width = Math.max(8, stdout.columns || 80);
-        const input = inputViewport(buffer, cursor, width - 4, viewStart);
+        const input = inputViewport(buffer, cursor, width - 6, viewStart);
         viewStart = input.start;
         const items = matches();
         selected = items.length ? (selected + items.length) % items.length : 0;
-        const rows = [inputBand(buffer.length ? input.text : 'Ask Poli anything…', width, {placeholder: !buffer.length}), composerMeta({model, mode, width, lines: input.lines})];
+        const line = inputLine(buffer.length ? input.text : 'Write a message…', width, {placeholder: !buffer.length});
+        const rows = [line.row];
         if (items.length) {
           const count = Math.min(items.length, Math.max(1, Math.min(6, (stdout.rows || 24) - 8)));
           const offset = Math.max(0, Math.min(selected - count + 1, items.length - count));
@@ -120,7 +121,7 @@ export class PromptManager {
           }
           rows.push(style.dim(truncate(`  ↑↓ select · Tab fill · Esc close · ${selected + 1}/${items.length}`, width - 1)));
         }
-        view.paint(rows, 0, 2 + input.cursorColumn);
+        view.paint(rows, 0, 4 + input.cursorColumn, line);
       };
       const onResize = () => { view.resize(); render(); };
       const finish = (value) => {

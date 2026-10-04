@@ -1,20 +1,10 @@
-import { accent, colors, style, cellWidth, plainText, truncate } from './theme.js';
+import { accent, colors, cellWidth, plainText, truncate } from './theme.js';
 
-export function inputBand(text, width, { placeholder = false } = {}) {
-  const body = truncate(plainText(text), Math.max(1, width - 3));
-  const foreground = placeholder ? colors.rgb(106, 151, 117) : colors.rgb(190, 255, 174);
-  // Erase with the input background instead of writing a screenful of spaces.
-  // Space padding becomes real wrapped lines when mobile clients reconnect.
-  return colors.bgRgb(15, 35, 24) + colors.rgb(155, 255, 140) + colors.bold + '› ' + foreground + body + '\x1b[K' + colors.reset;
-}
-
-export function composerMeta({ model = 'poli', mode = 'agent', width, working = false, queued = 0, lines = 1 }) {
-  const hint = working ? (queued ? `${queued} queued · Esc stop` : 'Enter queue · Esc stop') : 'Enter send · / commands';
-  const context = `${plainText(model)} · ${mode === 'chat' ? 'chat' : 'agent'}${lines > 1 ? ` · ${lines} lines` : ''}`;
-  const room = width - cellWidth(hint) - 4;
-  if (room < 10) return style.dim(truncate(working && queued ? `${queued} queued · Esc stop` : context, width - 1));
-  const left = truncate(context, room);
-  return accent(left) + style.dim(' · ' + hint);
+export function inputLine(text, width, { placeholder = false, working = false, frame = 0 } = {}) {
+  const brightness = [120, 150, 190, 235, 190, 150][Math.floor(frame / 2) % 6];
+  const prefix = (working ? colors.rgb(70, brightness, 100) + '● ' + colors.reset : '  ') + accent('› ');
+  const body = (placeholder ? colors.rgb(125, 165, 133) : colors.rgb(190, 255, 174)) + truncate(plainText(text), Math.max(1, width - 5)) + colors.reset;
+  return {prefix, body, row: prefix + body};
 }
 
 // All positions are relative to the editable row. No alternate screen, scroll
@@ -25,7 +15,7 @@ export class ComposerView {
     this.write('\r' + (this.visible && this.inputRow ? `\x1b[${this.inputRow}A` : '') + '\x1b[J');
     this.visible = false;
   }
-  paint(rows, inputRow, cursorColumn) {
+  paint(rows, inputRow, cursorColumn, {prefix, body} = {}) {
     if (this.visible && (rows.length !== this.rows.length || inputRow !== this.inputRow)) this.clear();
     if (!this.visible) {
       // Reconnection and resizing can leave the physical cursor partway across
@@ -37,11 +27,13 @@ export class ComposerView {
     } else {
       for (let row = 0; row < rows.length; row++) {
         if (rows[row] === this.rows[row]) continue;
+        if (rows.length === 1 && body && body === this.body) { this.write('\r' + prefix); continue; }
         const offset = row - inputRow;
         this.write('\r' + (offset ? `\x1b[${Math.abs(offset)}${offset < 0 ? 'A' : 'B'}` : '') + '\x1b[2K' + rows[row]);
         if (offset) this.write(`\x1b[${Math.abs(offset)}${offset < 0 ? 'B' : 'A'}`);
       }
     }
+    this.body = body;
     this.rows = rows; this.inputRow = inputRow; this.cursorColumn = cursorColumn;
     this.write(`\r\x1b[${cursorColumn}C`);
   }

@@ -34,8 +34,8 @@ test('idle input, model footer, and slash menu survive mobile reflow without sta
   } finally { f.terminal.dispose(); }
 });
 
-function fixture(rows = 24, cols = 80) {
-  const terminal = new Terminal({ rows, cols, scrollback: 1000, convertEol: true, allowProposedApi: true });
+function fixture(rows = 24, cols = 80, terminalOptions = {}) {
+  const terminal = new Terminal({ rows, cols, scrollback: 1000, convertEol: true, allowProposedApi: true, ...terminalOptions });
   const input = new PassThrough(); input.isTTY = true; input.isRaw = false;
   input.setRawMode = value => { input.isRaw = value; };
   const output = new PassThrough(); output.isTTY = true; output.rows = rows; output.columns = cols;
@@ -44,6 +44,28 @@ function fixture(rows = 24, cols = 80) {
   const flush = () => new Promise(resolve => terminal.write('', resolve));
   const lines = () => Array.from({length: terminal.buffer.active.length}, (_, i) => terminal.buffer.active.getLine(i)?.translateToString(true) || '');
   return { terminal, input, output, composer, flush, lines };
+}
+
+for (const windowsMode of [false, true]) {
+  test(`reconnecting preserves one idle composer when terminal reflow is ${windowsMode ? 'disabled' : 'enabled'}`, async () => {
+    const f = fixture(52, 110, {windowsMode});
+    const view = new ComposerView(f.output, text => f.output.write(text));
+    const paint = () => view.paint([inputBand('Ask Poli anything…', f.output.columns, {placeholder: true}), composerMeta({model: 'cbai/hy4-preview', width: f.output.columns})], 0, 2);
+    try {
+      for (let i = 0; i < 70; i++) f.output.write(`RECONNECT_HISTORY_${i}\n`);
+      paint(); await f.flush();
+      for (const [cols, rows] of [[110, 22], [68, 22], [68, 22], [110, 52], [110, 22], [110, 22]]) {
+        f.terminal.resize(cols, rows); f.output.columns = cols; f.output.rows = rows;
+        view.resize(); paint(); await f.flush();
+        const lines = f.lines();
+        assert.equal(lines.filter(line => line.includes('Ask Poli anything')).length, 1, lines.join('\n'));
+        assert.equal(lines.filter(line => line.includes('cbai/hy4-preview')).length, 1, lines.join('\n'));
+        for (let i = 0; i < 70; i++) assert.ok(lines.includes(`RECONNECT_HISTORY_${i}`), lines.join('\n'));
+      }
+      view.clear(); await f.flush();
+      assert.ok(!f.lines().some(line => line.includes('Ask Poli anything')));
+    } finally { f.terminal.dispose(); }
+  });
 }
 test('ending a turn appends the next prompt below the answer instead of overwriting the header', async () => {
   const f = fixture();

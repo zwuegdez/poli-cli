@@ -2,9 +2,10 @@ import { accent, colors, style, cellWidth, plainText, truncate } from './theme.j
 
 export function inputBand(text, width, { placeholder = false } = {}) {
   const body = truncate(plainText(text), Math.max(1, width - 3));
-  const padding = ' '.repeat(Math.max(0, width - 1 - 2 - cellWidth(body)));
   const foreground = placeholder ? colors.rgb(106, 151, 117) : colors.rgb(190, 255, 174);
-  return colors.bgRgb(15, 35, 24) + colors.rgb(155, 255, 140) + colors.bold + '› ' + foreground + body + padding + colors.reset;
+  // Erase with the input background instead of writing a screenful of spaces.
+  // Space padding becomes real wrapped lines when mobile clients reconnect.
+  return colors.bgRgb(15, 35, 24) + colors.rgb(155, 255, 140) + colors.bold + '› ' + foreground + body + '\x1b[K' + colors.reset;
 }
 
 export function composerMeta({ model = 'poli', mode = 'agent', width, working = false, queued = 0, lines = 1 }) {
@@ -13,7 +14,7 @@ export function composerMeta({ model = 'poli', mode = 'agent', width, working = 
   const room = width - cellWidth(hint) - 4;
   if (room < 10) return style.dim(truncate(working && queued ? `${queued} queued · Esc stop` : context, width - 1));
   const left = truncate(context, room);
-  return accent(left) + ' '.repeat(width - 1 - cellWidth(left) - cellWidth(hint)) + style.dim(hint);
+  return accent(left) + style.dim(' · ' + hint);
 }
 
 // All positions are relative to the editable row. No alternate screen, scroll
@@ -27,7 +28,9 @@ export class ComposerView {
   paint(rows, inputRow, cursorColumn) {
     if (this.visible && (rows.length !== this.rows.length || inputRow !== this.inputRow)) this.clear();
     if (!this.visible) {
-      this.write(rows.join('\r\n'));
+      // Reconnection and resizing can leave the physical cursor partway across
+      // a row. Always start at column zero before creating the composer.
+      this.write('\r' + rows.join('\r\n'));
       const up = rows.length - 1 - inputRow;
       if (up) this.write(`\x1b[${up}A`);
       this.visible = true;

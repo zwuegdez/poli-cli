@@ -80,5 +80,8 @@ test('text search uses direct grep when ripgrep is absent from PATH', async t=>{
     const result=await executeTool('grep_search',{query:'Marker',path_pattern:'src/a.js'},context);
     assert.equal(result.engine,'grep',JSON.stringify(result));
     assert.equal(result.match_count,1,JSON.stringify(result));
+    const glob=await executeTool('grep_search',{query:'Marker',path_pattern:'src/**/*.test.js'},context);
+    assert.equal(glob.engine,'grep',JSON.stringify(glob));
+    assert.equal(glob.match_count,2,JSON.stringify(glob));
   } finally {process.env.PATH=previous;}
 });

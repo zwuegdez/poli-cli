@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { executeFileSearch } from './file_search.js';
 
 export const grepSearchDefinition = {
   type: 'function',
@@ -56,11 +57,17 @@ export async function executeGrepSearch(args, context = {}) {
     const fallback=['-r','-n','-H','-I','--exclude-dir=node_modules','--exclude-dir=.git','--exclude=*.lock','--exclude=*.sqlite*'];
     if(!args.case_sensitive)fallback.push('-i');
     fallback.push(args.literal?'-F':'-E');
+    let targets=[existing?candidate:workspaceDir],limitedFiles=false;
     if(args.path_pattern&&!existing) {
-      if(args.path_pattern.includes('/'))return{error:'Glob paths with directories require ripgrep. Use a file or directory path instead.'};
-      fallback.push('--include='+args.path_pattern);
+      const found=await executeFileSearch({pattern:args.path_pattern,max_results:500},context);
+      if(found.error||found.rejected)return found;
+      if(!found.files.length)return{query:args.query,engine:'grep',matches:[],match_count:0,truncated:false};
+      targets=found.files.map(file=>path.resolve(workspaceDir,file));limitedFiles=found.truncated;
     }
-    try { return{query:args.query,engine:'grep',...await searchProcess('grep',[...fallback,'-e',args.query,'--',existing?candidate:workspaceDir],workspaceDir,context.signal)}; }
+    try {
+      const result=await searchProcess('grep',[...fallback,'-e',args.query,'--',...targets],workspaceDir,context.signal);
+      return{query:args.query,engine:'grep',...result,...(limitedFiles?{truncated:true,message:'Matching file list reached its limit. Restrict path_pattern to search more precisely.'}:{})};
+    }
     catch(fallbackError){return{error:`Search failed: ${fallbackError.message}`};}
   }
 }

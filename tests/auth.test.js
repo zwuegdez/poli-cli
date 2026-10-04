@@ -25,7 +25,7 @@ test('a clean source checkout cannot authenticate with a bundled shared key', t 
   const {env} = fixture(t);
   const credentials = evaluate(env, "import {loadCredentials} from './src/auth.js'; console.log(JSON.stringify(loadCredentials()));");
   assert.equal(credentials.apiKey, '');
-  const result = spawnSync(process.execPath, ['bin/poli.js', '--chat', 'hello'], {
+  const result = spawnSync(process.execPath, ['tests/fixtures/cli-runtime.js', '--chat', 'hello'], {
     cwd: new URL('..', import.meta.url), env, encoding: 'utf8', timeout: 10000
   });
   assert.equal(result.status, 1);

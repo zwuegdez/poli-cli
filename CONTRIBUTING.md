@@ -10,12 +10,13 @@ Use Node.js 18+ and npm; CI tests Node.js 22 and 24.
 ```bash
 npm ci
 npm test
-npm run ui:preview
 ```
 
-The tests and UI preview run without a production API key. For live integration
-work, configure your own endpoint and credentials as described in the README.
-Never commit those credentials or a raw production response containing secrets.
+Public runtime and UI preview entrypoints currently show “Coming soon.”
+Development tests exercise the unreleased implementation using local fixtures,
+without production credentials. Do not add a public activation flag or restore
+launch instructions while access is paused. Never commit credentials or raw
+production responses containing secrets.
 
 ## Report a bug
 
@@ -31,8 +32,9 @@ are useful; remove API keys, private code, and identifying details first.
 2. Use the existing JavaScript ES module style; avoid unrelated rewrites.
 3. Add a regression test when the fix changes nontrivial behavior. Use local
    HTTP fixtures and temporary directories rather than production services.
-4. Run `npm test`. For UI changes, also exercise `npm run ui:preview`, typing,
-   pasting, cancellation, narrow windows, and the affected terminal client.
+4. Run `npm test`. For UI changes, cover typing, pasting, cancellation, and
+   narrow-window behavior with terminal fixtures. Record real-client validation
+   separately; public entrypoints must remain paused.
 5. Open a pull request describing the trigger, resulting behavior, validation,
    and any remaining limits. Link the issue when one exists.
 

@@ -16,8 +16,8 @@ verified activity or adoption numbers.
 
 Poli CLI is an early-stage terminal coding assistant with streaming chat,
 workspace file and shell tools, a searchable model picker, and resumable
-conversations. It connects to a user-configured OpenAI-compatible endpoint;
-model access and credentials are supplied separately.
+conversations. The unreleased implementation supports a user-configured OpenAI-compatible
+endpoint; public runtime access is currently disabled.
 
 My main focus is reliable interaction while the assistant works: retaining
 unsent drafts, queueing follow-ups, showing compact tool results, and preserving
@@ -29,16 +29,16 @@ bugs that I am investigating with terminal simulations and real-client reports.
 I would use Codex to reproduce and fix input/reconnect bugs, review the tool
 execution and credential boundaries, improve provider compatibility, and build
 regression tests for streaming and cancellation. The goal is a CLI that other
-contributors can run, inspect, and improve with their own endpoint, without
-bundled production credentials.
+contributors can inspect and improve, with user-supplied endpoint credentials
+when the public runtime reopens.
 
 ## Current scope and evidence
 
 The repository includes automated tests using local HTTP fixtures and a
-headless terminal, plus a UI preview that requires no model access. Tests cover
+headless terminal. Public CLI and preview entrypoints show “Coming soon.” Tests cover
 stream parsing, tool handling, session resume, model selection, Unicode editing,
 and resize behavior. Contribution instructions and security reporting are
-included. Public installation is paused while release preparation continues.
+included. Public runtime access and installation are paused while release preparation continues.
 
 The project is new. I am not claiming widespread adoption or an established
 ecosystem role. My case is the concrete work and public development plan, and I
@@ -51,7 +51,7 @@ understand that this may not yet meet the program's selection priorities.
 - Verified active users, contributors, stars, forks, or downstream use, if any.
   Do not invent metrics or describe your own sessions as community adoption.
 - Two or three links to merged fixes and regression tests.
-- A demo or reproducible example of the UI preview.
+- A sanitized demo or reproducible terminal fixture showing the intended UI.
 - Your intended use of ChatGPT Pro/Codex. Request API credits only if you have a
   specific OSS API workflow and can explain the planned usage.
 

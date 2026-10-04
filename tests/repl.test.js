@@ -18,7 +18,7 @@ async function fixture(t, handler) {
   fs.writeFileSync(path.join(dir,'config.json'),JSON.stringify({baseUrl:`http://127.0.0.1:${server.address().port}/v1`,model:'selected',mode:'chat'}));
   t.after(()=>{server.closeAllConnections();server.close();fs.rmSync(dir,{recursive:true,force:true});});
   return (args,input='')=>new Promise((resolve,reject)=>{
-    const child=spawn(process.execPath,['bin/poli.js',...args],{cwd:new URL('..',import.meta.url),env:{...process.env,POLI_CODE_HOME:dir,POLI_API_KEY:'fake',NO_COLOR:'1'}});
+    const child=spawn(process.execPath,['tests/fixtures/cli-runtime.js',...args],{cwd:new URL('..',import.meta.url),env:{...process.env,POLI_CODE_HOME:dir,POLI_API_KEY:'fake',NO_COLOR:'1'}});
     let stdout='',stderr='';child.stdout.on('data',d=>stdout+=d);child.stderr.on('data',d=>stderr+=d);
     const timer=setTimeout(()=>{child.kill();reject(new Error('CLI did not exit'));},10000);
     child.on('error',reject);child.on('close',code=>{clearTimeout(timer);resolve({code,stdout,stderr});});child.stdin.end(input);

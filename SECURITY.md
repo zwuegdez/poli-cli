@@ -1,6 +1,7 @@
 # Security
 
-Poli CLI is pre-release software. Security fixes currently target the latest
+Poli CLI is pre-release software, and public runtime access is currently paused.
+The execution boundaries below describe its unreleased implementation. Security fixes currently target the latest
 version on `main`; older versions do not have a separate support branch.
 
 ## Report privately

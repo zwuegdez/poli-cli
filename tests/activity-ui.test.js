@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { changedLines, renderDiff } from '../src/ui/diff.js';
 import { toolDetails } from '../src/ui/tool-details.js';
 import { toolCard, stripAnsi, cellWidth } from '../src/ui/theme.js';
+import { subagentStatus } from '../src/ui/composer-view.js';
 
 test('change previews keep repeated context and distinguish inserted and removed lines', () => {
   const before = 'same\na\nsame\nb\nsame';
@@ -70,4 +71,19 @@ test('older tool results can be selected and invalid selections are explained', 
   assert.doesNotMatch(stripAnsi(toolDetails(messages, 2)), /latest output/);
   assert.match(stripAnsi(toolDetails(messages, 9)), /Only 2 tool results/);
   assert.match(stripAnsi(toolDetails(messages, 0)), /Use \/details/);
+});
+
+test('subagent activity and outcomes are visible, bounded, and frameless', () => {
+  const agents = [{agent_id:'agent_review',label:'Review',role:'reviewer',status:'running',activity:'Thinking',tool_calls:2}];
+  const activity = stripAnsi(subagentStatus(agents, 40));
+  assert.match(activity, /1 subagent · Review: Thinking/);
+  assert.ok(cellWidth(activity) <= 39);
+  assert.equal(subagentStatus([{...agents[0],status:'completed'}],40),'');
+  const result = {agents:[{...agents[0],status:'completed',report:'Read input.js and confirmed the change.'},{...agents[0],label:'Worker',status:'failed',error:'Provider unavailable'}]};
+  const card = stripAnsi(toolCard({name:'wait_agent',result,status:'success'}));
+  assert.match(card,/✓ Review · completed · 2 tool calls/);
+  assert.match(card,/× Worker · failed/);
+  assert.match(card,/Provider unavailable/);
+  assert.match(card,/Reports/);
+  assert.doesNotMatch(card,/[╭╮╰╯│]/);
 });

@@ -45,9 +45,8 @@ export async function executeWriteFile(args, context = {}) {
   // Interactive confirmation if not auto-approved
   if (!autoApprove && promptManager) {
     const diff = renderDiff(args.file_path, oldContent, args.content);
-    process.stdout.write(`\n${diff}\n\n`);
     const actionDesc = fileExists ? `Overwrite ${args.file_path}?` : `Create ${args.file_path}?`;
-    const confirmed = await promptManager.confirm(actionDesc, true, { signal: context.signal, onCancel: context.cancelTurn });
+    const confirmed = await promptManager.confirm(actionDesc, true, { signal: context.signal, onCancel: context.cancelTurn, preview: diff });
     if (!confirmed) {
       return { rejected: true, message: `User declined creating/overwriting ${args.file_path}` };
     }
@@ -55,6 +54,7 @@ export async function executeWriteFile(args, context = {}) {
 
   if (context.signal?.aborted) return { rejected: true, message: 'Turn stopped.' };
   try {
+    if (fs.existsSync(filePath) !== fileExists || fileExists && fs.readFileSync(filePath, 'utf8') !== oldContent) return { error: 'File changed while awaiting approval. Read it again before overwriting.' };
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });

@@ -1,4 +1,5 @@
 // OpenAI-compatible transport. Handles SSE, JSON-only routers, and cancellation.
+import crypto from 'node:crypto';
 export class ApiError extends Error {
   constructor(message, status = 0, code = '') { super(message); this.name = 'ApiError'; this.status = status; this.code = code; }
 }
@@ -17,7 +18,14 @@ function resultFromJson(data) {
   if (data.error) throw new ApiError(data.error.message || String(data.error), 0, data.error.code);
   const choice = data.choices?.[0];
   if (!choice?.message) throw new ApiError('The router returned no assistant message. Try /models or /retry.');
+  checkProviderMessage(choice.message);
   return { message: choice.message, usage: data.usage || null, finishReason: choice.finish_reason, meta: data.poliai || null };
+}
+
+function checkProviderMessage(message) {
+  if (!message?.tool_calls?.length && typeof message?.content === 'string' && /^\[No response generated[\s\S]*service may be having issues[\s\S]*\]$/i.test(message.content.trim())) {
+    throw new ApiError('The provider returned an unavailable-service placeholder instead of an answer. Use /retry or choose another model with /models.', 503, 'provider_empty_response');
+  }
 }
 
 export class PoliClient {
@@ -60,6 +68,7 @@ export class PoliClient {
       const res = await this.request('/chat/completions', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: stream ? 'text/event-stream' : 'application/json' }, body: JSON.stringify(body),
       }, scope);
+      onChunk?.({ type: 'connected' });
       if (!stream || res.headers.get('content-type')?.includes('application/json')) {
         const result = resultFromJson(await res.json());
         if (stream && result.message.content) onChunk?.({ type: 'content', text: result.message.content });
@@ -90,10 +99,10 @@ export class PoliClient {
         if (reasoning) onChunk?.({ type: 'reasoning', text: reasoning });
         for (const part of delta.tool_calls || []) {
           const index = part.index ?? 0;
-          if (!calls.has(index)) calls.set(index, { id: part.id || `call_${index}`, type: 'function', function: { name: '', arguments: '' } });
+          if (!calls.has(index)) calls.set(index, { id: part.id || `call_${crypto.randomBytes(8).toString('hex')}`, type: 'function', function: { name: '', arguments: '' } });
           const call = calls.get(index);
           if (part.id) call.id = part.id;
-          if (part.function?.name) call.function.name += part.function.name;
+          if (part.function?.name && part.function.name !== call.function.name) call.function.name = part.function.name.startsWith(call.function.name) ? part.function.name : call.function.name + part.function.name;
           if (part.function?.arguments) call.function.arguments += part.function.arguments;
           onChunk?.({ type: 'tool', name: call.function.name });
         }
@@ -109,6 +118,7 @@ export class PoliClient {
       if (!received || !content && !toolCalls.length) throw new ApiError('The model returned no text or tool calls. Choose another model with /models or use /retry.');
       if (!ended && !finishReason) throw new ApiError('The response stream ended before completion. Use /retry to try again.');
       if (toolCalls.some(call => !call.function.name)) throw new ApiError('The model returned an incomplete tool call. Use /retry.');
+      checkProviderMessage({content,tool_calls:toolCalls});
       this.modelFailures.delete(model);
       return { message: { role: 'assistant', content: content || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) }, usage, finishReason };
     } catch (error) {

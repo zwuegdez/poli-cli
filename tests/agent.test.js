@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { parseBridgeCalls, chatMessages } from '../src/tool-bridge.js';
+import { parseBridgeCalls, chatMessages, combineToolCalls, unsupportedTools } from '../src/tool-bridge.js';
 import { executeTool } from '../src/tools/index.js';
 import { chooseModel, modelChoices } from '../src/commands/models.js';
 import { filterChoices } from '../src/ui/select.js';
@@ -160,4 +160,162 @@ test('empty tool results are reported as failures instead of successful actions'
     }}});await agent.runTurn('inspect');`);
   assert.match(output,/× Listed/);
   assert.doesNotMatch(output,/✓ Listed/);
+});
+
+test('slow model metadata cannot delay inference and is cancelled after completion', () => {
+ scenario(`
+  let metadataSignal, requests=0;
+  const client={listModels:async({signal})=>{metadataSignal=signal;return new Promise(()=>{});},async createChatCompletion(){requests++;return{message:{content:'Immediate answer'}};}};
+  const agent=new PoliAgent({session,config:{model:'test',mode:'agent'},client});
+  await agent.runTurn('hello');
+  assert.equal(requests,1);assert.equal(metadataSignal.aborted,true);
+ `);
+});
+test('chat skips model discovery and configured streaming preference reaches the provider', () => {
+ scenario(`
+  const client={listModels:()=>assert.fail('Chat should not load metadata'),async createChatCompletion(body){assert.equal(body.stream,false);return{message:{content:'Hello'}};}};
+  await new PoliAgent({session,config:{model:'test',mode:'chat',stream:false},client}).runTurn('hello');
+ `);
+});
+test('Thinking status is shown only when the provider streams reasoning', () => {
+ scenario(`
+  const activity=[];
+  const original=process.stdout.isTTY;
+  Object.defineProperty(process.stdout,'isTTY',{value:true,configurable:true});
+  const input={active:true,start(){process.stdout.poliTurnInput=this;},setActivity(text){activity.push(text)},drain(){return[]},draft(){return''},close(){delete process.stdout.poliTurnInput}};
+  try {
+   await new PoliAgent({session,config:{model:'test',mode:'chat'},createTurnInput:()=>input,client:{async createChatCompletion(body){
+    assert.equal(activity.at(-1),'Waiting for model…');
+    body.onChunk({type:'connected'});assert.equal(activity.at(-1),'Generating response…');
+    body.onChunk({type:'reasoning',text:'reasoning delta'});assert.equal(activity.at(-1),'Thinking…');
+    body.onChunk({type:'content',text:'Hello'});assert.equal(activity.at(-1),'Responding…');
+    return{message:{content:'Hello'}};
+   }}}).runTurn('hello');
+  } finally {Object.defineProperty(process.stdout,'isTTY',{value:original,configurable:true});delete process.stdout.poliTurnInput;}
+ `);
+});
+
+test('switching models preserves messages and sends a factual handoff to the next model', () => {
+  scenario(`
+    messages.push({role:'user',content:'Fix reconnect duplication'},{role:'assistant',tool_calls:[{id:'read',function:{name:'view_file',arguments:'{"file_path":"input.js"}'}}]},{role:'tool',name:'view_file',tool_call_id:'read',content:'Actual input.js contents'});
+    const config={model:'old'};
+    const agent=new PoliAgent({session,config,client:{async createChatCompletion(body){
+      assert.equal(body.model,'new');
+      assert.match(body.messages[0].content,/Conversation continuity/);
+      assert.match(body.messages[0].content,/Actual input.js contents/);
+      assert.ok(body.messages.some(message=>message.content==='Fix reconnect duplication'));
+      assert.ok(body.messages.some(message=>message.tool_call_id==='read'));
+      return{message:{content:'I have the previous task and tool results.'}};
+    }}});
+    config.model='new';agent.setModel({id:'new',capabilities:{tools:true}});
+    await agent.runTurn('Continue the task');
+  `);
+});
+
+test('native-capable models can still use the text bridge without exposing its blocks', () => {
+  const output = scenario(`let requests=0, actions=0;
+    const agent=new PoliAgent({session,config:{model:'test'},execute:async()=>{actions++;return{items:['fixture']}},client:{async createChatCompletion(body){
+      assert.ok(body.tools.length);
+      return requests++===0?{message:{content:'\`\`\`poli-tool\\n{"name":"list_dir","arguments":{}}\\n\`\`\`'}}:{message:{content:'Inspected fixture'}};
+    }}});
+    agent.setModel({id:'test',capabilities:{tools:true}});
+    await agent.runTurn('Inspect files');assert.equal(actions,1);
+  `);
+  assert.doesNotMatch(output, /```poli-tool|Could not find the language/);
+});
+
+test('matching native and bridge calls execute once while intentional native repeats remain', () => {
+  const native = {id:'native',function:{name:'list_dir',arguments:'{"recursive":false,"dir_path":"."}'}};
+  const bridged = {id:'text',function:{name:'list_directory',arguments:'{"path":".","recursive":false}'}};
+  assert.deepEqual(combineToolCalls([native], [bridged]), [native]);
+  assert.equal(combineToolCalls([native, native], [bridged]).length, 2);
+  assert.equal(combineToolCalls([], [bridged, bridged]).length, 2);
+});
+
+test('fallback detection accepts explicit tool rejection and excludes unrelated provider errors', () => {
+  assert.equal(unsupportedTools({status:400,message:'Unknown parameter: tools'}),true);
+  assert.equal(unsupportedTools({status:422,message:'tool_choice is unsupported'}),true);
+  assert.equal(unsupportedTools({status:400,message:'Invalid API key'}),false);
+  assert.equal(unsupportedTools({status:503,message:'Tools unsupported'}),false);
+});
+
+test('parent automatically collects subagent results before delivering its final synthesis', () => {
+  scenario(`let requests=0, childRequests=0;
+    const agent=new PoliAgent({session,config:{model:'test'},client:{async createChatCompletion(body){
+      if(body.messages[0].content.includes('You are subagent')){childRequests++;return{message:{content:'Verified child result'}};}
+      if(requests++===0)return{message:{tool_calls:[{id:'spawn',function:{name:'spawn_agent',arguments:'{"task":"Review files","label":"Review"}'}}]}};
+      if(requests===2)return{message:{content:'Preparing the combined report'}};
+      assert.ok(body.messages.some(message=>message.role==='tool'&&message.name==='wait_agent'&&message.content.includes('Verified child result')));
+      return{message:{content:'Final synthesis includes verified child result'}};
+    }}});
+    await agent.runTurn('Delegate a review');
+    assert.equal(childRequests,1);assert.equal(requests,3);
+    assert.match(messages.at(-1).content,/Final synthesis/);
+    assert.equal(agent.subagents.running().length,0);
+    const wait=messages.find(message=>message.name==='wait_agent');
+    assert.ok(messages.some(message=>message.tool_calls?.some(call=>call.id===wait.tool_call_id)));
+  `);
+});
+
+test('provider cancellation cannot hang the main CLI turn', () => {
+  scenario(`
+    const controller=new AbortController();
+    const agent=new PoliAgent({session,config:{model:'test'},client:{async createChatCompletion(){controller.abort();return new Promise(()=>{});}}});
+    const result=await agent.runTurn('hello',{signal:controller.signal});
+    assert.equal(result.cancelled,true);
+  `);
+});
+
+test('cancelling an automatic subagent wait records a paired tool outcome', () => {
+  scenario(`let requests=0;
+    const controller=new AbortController();
+    const agent=new PoliAgent({session,config:{model:'test'},client:{async createChatCompletion(body){
+      if(body.messages[0].content.includes('You are subagent'))return new Promise(()=>{});
+      if(requests++===0)return{message:{tool_calls:[{id:'spawn',function:{name:'spawn_agent',arguments:'{"task":"Review files"}'}}]}};
+      setTimeout(()=>controller.abort(),10);return{message:{content:'Waiting for the report'}};
+    }}});
+    const result=await agent.runTurn('Delegate review',{signal:controller.signal});
+    assert.equal(result.cancelled,true);
+    for(const message of messages.filter(message=>message.tool_calls))for(const call of message.tool_calls)assert.ok(messages.some(message=>message.role==='tool'&&message.tool_call_id===call.id));
+    assert.equal(JSON.parse(messages.at(-1).content).rejected,true);
+  `);
+});
+
+test('context overflow recovers even within one long task and keeps original results searchable', () => {
+  scenario(`let requests=0;
+    messages.push({role:'user',content:'Long task'});
+    for(let index=0;index<12;index++)messages.push({role:'assistant',tool_calls:[{id:'call_'+index,function:{name:'view_file',arguments:'{"file_path":"a.js"}'}}]},{role:'tool',name:'view_file',tool_call_id:'call_'+index,content:'Stored evidence '+index+' '+'x'.repeat(20000)});
+    const agent=new PoliAgent({session,config:{model:'test'},client:{async createChatCompletion(body){
+      if(requests++===0)throw Object.assign(new Error('Context length exceeded'),{code:'context_length_exceeded'});
+      assert.ok(JSON.stringify(body.messages).length<100000);
+      assert.ok(body.messages.some(message=>message.content==='Continue the original task'));
+      assert.ok(messages.some(message=>message.role==='tool'&&message.content.length>20000));
+      return{message:{content:'Continued successfully'}};
+    }}});
+    await agent.runTurn('Continue the original task');assert.equal(requests,2);
+  `);
+});
+
+test('parent streaming output cannot overwrite a subagent approval question', () => {
+  scenario(`
+    const fs=await import('node:fs'),os=await import('node:os'),path=await import('node:path');
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'poli-concurrent-approval-'));session.workspaceDir=dir;
+    let started,release,requests=0,childRequests=0,printed='';
+    const entered=new Promise(resolve=>started=resolve),gate=new Promise(resolve=>release=resolve);
+    const original=process.stdout.write;
+    process.stdout.write=function(chunk,...args){printed+=String(chunk);return original.call(this,chunk,...args);};
+    try{
+      const agent=new PoliAgent({session,config:{model:'test',permission:'ask'},promptManager:{confirm:async(message,defaultYes,options)=>{
+        assert.match(message,/Subagent Worker/);assert.match(options.preview,/created content/);started();await gate;return true;
+      }},client:{async createChatCompletion(body){
+        if(body.messages[0].content.includes('You are subagent'))return childRequests++===0?{message:{tool_calls:[{id:'write',function:{name:'write_file',arguments:'{"file_path":"created.txt","content":"created content"}'}}]}}:{message:{content:'Created file with approval'}};
+        if(requests++===0)return{message:{tool_calls:[{id:'spawn',function:{name:'spawn_agent',arguments:'{"task":"Create created.txt","label":"Worker","role":"worker"}'}}]}};
+        if(requests===2){await entered;body.onChunk({type:'content',text:'MUST_BUFFER\\n'});assert.doesNotMatch(printed,/MUST_BUFFER/);release();return{message:{content:'MUST_BUFFER\\n'}};}
+        return{message:{content:'Final approved result'}};
+      }}});
+      await agent.runTurn('Delegate file creation');
+      assert.equal(fs.readFileSync(path.join(dir,'created.txt'),'utf8'),'created content');
+      assert.match(printed,/MUST_BUFFER/);assert.equal(process.stdout.poliApprovalActive,undefined);
+    }finally{process.stdout.write=original;fs.rmSync(dir,{recursive:true,force:true});}
+  `);
 });

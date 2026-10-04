@@ -50,16 +50,21 @@ export async function executeViewFile(args, context = {}) {
 
   try {
     const content = fs.readFileSync(filePath, 'utf8');
-    const lines = content.split('\n');
+    if (args.start_line != null && args.start_line < 1 || args.end_line != null && args.end_line < 1) return { error: 'Line numbers must be positive and 1-indexed.' };
+    const endsWithNewline = content.endsWith('\n');
+    const lines = content ? content.split('\n') : [];
+    if (endsWithNewline) lines.pop();
     const totalLines = lines.length;
 
     let start = args.start_line ? Math.max(1, args.start_line) : 1;
-    let end = args.end_line ? Math.min(totalLines, args.end_line) : Math.min(totalLines, start + 300);
+    let end = args.end_line ? Math.min(totalLines, args.end_line) : Math.min(totalLines, start + 299);
+    if (args.end_line != null && args.end_line < start) return { error: 'end_line must be greater than or equal to start_line.' };
 
     if (start > totalLines) {
       return {
         file_path: args.file_path,
         total_lines: totalLines,
+        ends_with_newline: endsWithNewline,
         content: `[File has only ${totalLines} lines]`
       };
     }
@@ -70,15 +75,19 @@ export async function executeViewFile(args, context = {}) {
       return `${String(lineNum).padStart(5, ' ')}: ${line}`;
     });
 
-    const isTruncated = end < totalLines;
+    const numberedContent = numbered.join('\n');
+    const clipped = numberedContent.length > 30000;
+    const isTruncated = end < totalLines || clipped;
 
     return {
       file_path: args.file_path,
       start_line: start,
       end_line: end,
       total_lines: totalLines,
+      ends_with_newline: endsWithNewline,
       truncated: isTruncated,
-      content: numbered.join('\n')
+      ...(clipped ? { line_output_truncated: true, message: 'File output exceeds 30000 characters. Request a smaller line range; a very long single line may need a shell command under suitable permissions.' } : {}),
+      content: numberedContent.slice(0, 30000)
     };
   } catch (err) {
     return { error: `Failed to read file: ${err.message}` };

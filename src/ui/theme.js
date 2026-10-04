@@ -261,7 +261,7 @@ export function box(title, content, options = {}) {
   return [top, ...rows, `${borderColor}╰${'─'.repeat(width - 2)}╯${colors.reset}`].join('\n');
 }
 
-export function banner({ version = '1.3.5', model = 'gpt-6.1-sol', cwd = process.cwd(), branch = '', autoApprove = false, mode = 'agent' } = {}) {
+export function banner({ version = '1.4.0', model = 'gpt-6.1-sol', cwd = process.cwd(), branch = '', autoApprove = false, permission, mode = 'agent' } = {}) {
   const width = terminalWidth();
   const rows = [];
   const brand = style.poliBrand();
@@ -295,7 +295,7 @@ export function banner({ version = '1.3.5', model = 'gpt-6.1-sol', cwd = process
     rows.push(`${style.dim(modelPrefix)}${style.bold(truncateMiddle(model, Math.max(1, width - cellWidth(modelPrefix))))}`);
   }
 
-  const approval = autoApprove ? (width >= 30 ? 'auto-approve' : 'auto') : (width >= 30 ? 'ask before changes' : 'ask');
+  const approval = permission === 'read-only' ? 'read-only' : permission === 'full' ? 'full access' : autoApprove ? (width >= 30 ? 'auto-approve' : 'auto') : (width >= 30 ? 'ask before changes' : 'ask');
   const approvalPrefix = width >= 20 ? 'approvals · ' : '';
   rows.push(`${style.dim(approvalPrefix)}${style.bold(approval)}`);
 
@@ -316,9 +316,9 @@ export function chatMessage(role, text, { queued = false } = {}) {
 
 export function toolActivity(name, args = {}) {
   if (!args || typeof args !== 'object') args = {};
-  const titles = { view_file: 'Reading', list_dir: 'Listing', file_search: 'Finding files for', grep_search: 'Searching', run_command: 'Running', edit_file: 'Editing', write_file: 'Writing' };
+  const titles = { search_history: 'Searching conversation for', spawn_agent: 'Delegating', wait_agent: 'Waiting for subagents', list_agents: 'Listing subagents', stop_agent: 'Stopping subagent', apply_patch: 'Applying patch', git_diff: 'Reviewing changes', view_file: 'Reading', list_dir: 'Listing', file_search: 'Finding files for', grep_search: 'Searching', run_command: 'Running', edit_file: 'Editing', write_file: 'Writing' };
   const safeName = plainText(name || 'tool');
-  const target = args.command || args.file_path || args.dir_path || args.query || args.pattern || '';
+  const target = args.task || args.agent_id || args.command || args.file_path || args.dir_path || args.query || args.pattern || '';
   return truncate(`${titles[safeName] || safeName}${target ? ' ' + plainText(target) : ''}`, Math.max(4, terminalWidth() - 2));
 }
 
@@ -328,8 +328,11 @@ export function toolCard({ name, args = {}, status = 'running', result = null, e
   const states = { success: ['✓', style.green], error: ['×', style.red], rejected: ['!', style.yellow], running: ['◌', accent] };
   const [icon, color] = states[status] || ['·', style.dim];
   const safeName = plainText(name || 'tool');
-  const target = plainText(args.command || args.file_path || args.dir_path || args.query || args.pattern || '');
+  const target = plainText(name === 'spawn_agent' ? args.label || truncate(args.task || '', 100) : args.agent_id || args.command || args.file_path || args.dir_path || args.query || args.pattern || '');
   const actions = {
+    search_history: 'Searched conversation for', spawn_agent: 'Started subagent', wait_agent: 'Collected subagents', list_agents: 'Listed subagents', stop_agent: 'Requested stop for subagent',
+    apply_patch: 'Applied patch',
+    git_diff: 'Reviewed changes',
     view_file: 'Read',
     list_dir: 'Listed',
     file_search: 'Found',
@@ -354,6 +357,16 @@ export function toolCard({ name, args = {}, status = 'running', result = null, e
 
   const headline = `${color(icon)} ${style.bold(action)}${metrics.length ? style.dim('  ·  ' + metrics.join(' · ')) : ''}`;
   const rows = wrapText(headline, width);
+  if (name === 'spawn_agent' && result?.agent_id) rows.push(...wrapText(`  ↳ ${plainText(result.label)} · ${plainText(result.role)} · ${plainText(result.model)} · ${plainText(result.permission)} · ${plainText(result.agent_id)}`, width).map(style.dim));
+  if (Array.isArray(result?.agents)) for (const agent of result.agents.slice(0, 6)) {
+    const label = plainText(agent.label || agent.agent_id || 'subagent');
+    const state = plainText(agent.status || 'unknown');
+    const count = agent.tool_calls || 0;
+    rows.push(...wrapText(`  ${state === 'completed' ? '✓' : state === 'running' ? '◌' : '×'} ${label} · ${state} · ${count} ${count === 1 ? 'tool call' : 'tool calls'}`, width).map(state === 'completed' ? style.green : state === 'running' ? style.dim : style.yellow));
+    const preview = agent.error || agent.report;
+    if (preview) rows.push(...wrapText(plainText(preview), Math.max(1, width - 4)).slice(0, 2).map(line => '    ' + style.dim(line)));
+  }
+  if (name === 'wait_agent' && result?.agents?.length) rows.push(...wrapText('    Reports · Ctrl+T or /details · full evidence in search_history', width).map(style.dim));
   if (result?.diff_preview) {
     for (const line of plainText(result.diff_preview).split('\n')) {
       const styled = /\s− /.test(line) ? style.red(line) : /\s\+ /.test(line) ? style.green(line) : style.dim(line);

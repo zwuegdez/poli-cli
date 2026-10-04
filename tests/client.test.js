@@ -56,3 +56,27 @@ test('requests time out instead of freezing the CLI', async t => {
   const client = await server(t, () => {});client.timeoutMs=25;
   await assert.rejects(client.createChatCompletion({model:'test',messages:[]}),/timed out/);
 });
+
+test('a provider service placeholder is recorded as a failure for both JSON and SSE', async t => {
+  const content='[No response generated — the service may be having issues. Try a different model.]';
+  for (const stream of [false,true]) {
+    const client=await server(t, (req,res)=>{
+      res.writeHead(200,{'content-type':stream?'text/event-stream':'application/json'});
+      res.end(stream?event({choices:[{delta:{content},finish_reason:'stop'}]})+'data: [DONE]\n\n':JSON.stringify({choices:[{message:{content}}]}));
+    });
+    await assert.rejects(client.createChatCompletion({model:'test',messages:[],stream}),error=>error.status===503&&error.code==='provider_empty_response');
+    assert.match(client.modelFailures.get('test'),/placeholder/);
+  }
+});
+
+test('repeated or cumulative streamed tool names do not corrupt the function name', async t => {
+  const client=await server(t,(req,res)=>{
+    res.writeHead(200,{'content-type':'text/event-stream'});
+    res.end(event({choices:[{delta:{tool_calls:[{index:0,function:{name:'list_',arguments:'{'}}]}}]})+event({choices:[{delta:{tool_calls:[{index:0,function:{name:'list_dir',arguments:'}'}}]}}]})+event({choices:[{delta:{tool_calls:[{index:0,function:{name:'list_dir'}}]},finish_reason:'tool_calls'}]})+'data: [DONE]\n\n');
+  });
+  const first=await client.createChatCompletion({model:'test',messages:[],stream:true});
+  const second=await client.createChatCompletion({model:'test',messages:[],stream:true});
+  assert.equal(first.message.tool_calls[0].function.name,'list_dir');
+  assert.equal(first.message.tool_calls[0].function.arguments,'{}');
+  assert.notEqual(first.message.tool_calls[0].id,second.message.tool_calls[0].id);
+});

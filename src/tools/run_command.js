@@ -1,7 +1,7 @@
 // Tool: run_command
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { colors } from '../ui/theme.js';
+import { plainText } from '../ui/theme.js';
 import { watchCancellation } from '../ui/select.js';
 
 export const runCommandDefinition = {
@@ -40,10 +40,9 @@ export async function executeRunCommand(args, context = {}) {
 
   // Ask for confirmation unless auto-approved or safe command (like git status, ls)
   const isSafeRead = !/[;&|<>`$\r\n]/.test(args.command) && /^(ls|dir|cat|head|tail|git status|git diff|pwd|echo|which|grep|find)\b/.test(args.command.trim());
-  if (!autoApprove && !isSafeRead && promptManager) {
-    process.stdout.write(`\n${colors.dim}Command:${colors.reset} ${colors.yellow}${args.command}${colors.reset}\n`);
-    process.stdout.write(`${colors.dim}Directory:${colors.reset} ${colors.gray}${targetCwd}${colors.reset}\n\n`);
-    const confirmed = await promptManager.confirm(`Execute this shell command?`, true, { signal: context.signal, onCancel: context.cancelTurn });
+  if (!autoApprove && (context.permission === 'ask' || !isSafeRead) && promptManager) {
+    const preview = `Command: ${plainText(args.command)}\nDirectory: ${plainText(targetCwd)}`;
+    const confirmed = await promptManager.confirm(`Execute this shell command?`, true, { signal: context.signal, onCancel: context.cancelTurn, preview });
     if (!confirmed) {
       return { rejected: true, message: `User declined command execution: ${args.command}` };
     }

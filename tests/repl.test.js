@@ -75,3 +75,14 @@ test('a conversation can be resumed across CLI processes without losing context'
   assert.equal(requests.length,2);
   assert.deepEqual(requests.at(-1).messages.filter(message=>message.role==='user').map(message=>message.content),['original task','follow-up task']);
 });
+
+test('/context shows usage and can configure or reset a model window without starting inference', async t => {
+  const cli=await fixture(t,()=>assert.fail('Context controls must not start inference'));
+  const configured=await cli([],'/context\n/context 128k\n/context nope\n/context auto\n/exit\n');
+  assert.equal(configured.code,0,configured.stderr);
+  assert.match(configured.stdout,/Context window/);
+  assert.match(configured.stdout,/not supplied by the provider/);
+  assert.match(configured.stdout,/128,000 tokens \(configured\)/);
+  assert.match(configured.stdout,/Usage: \/context/);
+  assert.match(configured.stdout,/not\s+tokenizer\s+measurements/);
+});

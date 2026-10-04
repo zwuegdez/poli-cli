@@ -4,13 +4,15 @@ import { ComposerView, inputLine, composerFooter } from './composer-view.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
-import { colors, style, accent, cellWidth, truncate, terminalWidth } from './theme.js';
+import { colors, style, accent, cellWidth, truncate, terminalWidth, plainText } from './theme.js';
 
 export const COMMAND_LIST = [
   { cmd: '/help', args: '', desc: 'Show all available slash commands and shortcuts', category: 'Commands' },
   { cmd: '/models', args: '', desc: 'Choose a model with arrows or search', category: 'Agent & Model' },
+  { cmd: '/permission', args: '', desc: 'Choose Read-only, Ask before changes, or Full access', alias: ['/permision', '/permissions'], category: 'Agent & Model' },
   { cmd: '/mode', args: '', desc: 'Choose Agent (workspace tools) or Chat', category: 'Agent & Model' },
   { cmd: '/retry', args: '', desc: 'Retry or continue the last task', category: 'Session & Memory' },
+  { cmd: '/agents', args: '', desc: 'List subagents and their task status', category: 'Agent & Model' },
   { cmd: '/tools', args: '', desc: 'Display all agent tools and capabilities', category: 'Agent & Model' },
   { cmd: '/details', args: '[number]', desc: 'Inspect tool results · 1 is latest · Ctrl+T', category: 'Agent & Model' },
   { cmd: '/resume', args: '[id]', desc: 'Resume a saved conversation in this workspace', category: 'Session & Memory' },
@@ -19,6 +21,7 @@ export const COMMAND_LIST = [
   { cmd: '/status', args: '', desc: 'View router endpoint health and session metrics', category: 'Session & Memory' },
   { cmd: '/tokens', args: '', desc: 'Show prompt, completion, and total token usage', category: 'Session & Memory' },
   { cmd: '/compact', args: '', desc: 'Compress conversation context to preserve tokens', category: 'Session & Memory' },
+  { cmd: '/context', args: '[tokens|auto|compact]', desc: 'View context usage or set this model’s window', category: 'Session & Memory' },
   { cmd: '/history', args: '', desc: 'Inspect recent conversation turn history', category: 'Session & Memory' },
   { cmd: '/clear', args: '', desc: 'Reset conversation context and start fresh', category: 'Session & Memory' },
   { cmd: '/config', args: '[get|set]', desc: 'View or modify local configuration', category: 'Settings' },
@@ -59,10 +62,10 @@ export class PromptManager {
   }
 
   saveHistory(line) {
-    if (!line) return;
+    this.historyIndex = -1;
+    if (!line || this.history[this.history.length - 1] === line) return;
     this.history.push(line);
     this.history = this.history.slice(-200);
-    this.historyIndex = -1;
     if (!this.historyFile) return;
     try {
       const dir = path.dirname(this.historyFile);
@@ -72,11 +75,11 @@ export class PromptManager {
     } catch {}
   }
 
-  promptUser({ model = 'gpt-6.1-sol', tokens = 0, mode = 'agent' } = {}) {
+  promptUser({ model = 'gpt-6.1-sol', tokens = 0, mode = 'agent', context } = {}) {
     if (!process.stdin.isTTY) {
       return this.promptFallback({ model, tokens });
     }
-    return this.promptRawInteractive({ model, tokens, mode });
+    return this.promptRawInteractive({ model, tokens, mode, context });
   }
 
   promptFallback() {
@@ -87,7 +90,7 @@ export class PromptManager {
     return this.fallbackLines.next().then(({ value, done }) => done ? '/exit' : value.trim());
   }
 
-  promptRawInteractive({ model = 'gpt-6.1-sol', tokens = 0, mode = 'agent' } = {}) {
+  promptRawInteractive({ model = 'gpt-6.1-sol', tokens = 0, mode = 'agent', context } = {}) {
     return new Promise((resolve) => {
       const stdin = process.stdin, stdout = process.stdout;
       const previousRaw = stdin.isRaw;
@@ -109,7 +112,7 @@ export class PromptManager {
         const items = matches();
         selected = items.length ? (selected + items.length) % items.length : 0;
         const line = inputLine(buffer.length ? input.text : 'Ask Poli to build, fix, or explain…', width, {placeholder: !buffer.length});
-        const rows = ['', ...composerFooter({model, mode, width, lines: input.lines})];
+        const rows = ['', ...composerFooter({model, mode, width, lines: input.lines, context})];
         if (items.length) {
           const count = Math.min(items.length, Math.max(1, Math.min(6, (stdout.rows || 24) - 8)));
           const offset = Math.max(0, Math.min(selected - count + 1, items.length - count));
@@ -154,12 +157,13 @@ export class PromptManager {
         if (key.sequence === '\x1b[201~') { pasting = false; insert(paste); render(); return; }
         if (pasting) { paste += str || key.sequence || ''; return; }
         if (key.ctrl && key.name === 't') { this.draft = text(); finish('/details'); return; }
-        if (key.ctrl && key.name === 'c') { if (buffer.length) { buffer = []; cursor = 0; dismissed = false; } else { finish('/exit'); return; } }
+        if (key.ctrl && key.name === 'c') { if (buffer.length) { buffer = []; cursor = 0; selected = 0; dismissed = false; this.historyIndex = -1; } else { finish('/exit'); return; } }
         else if (key.ctrl && key.name === 'd' && !buffer.length) { finish('/exit'); return; }
         else if (key.sequence === '\n' || key.ctrl && key.name === 'j' || (key.name === 'return' || key.name === 'enter') && (key.shift || key.meta)) insert('\n');
         else if (key.name === 'return' || key.name === 'enter') {
           const item = matches()[selected];
-          if (item && item.args.startsWith('<')) { buffer = splitInput(item.cmd + ' '); cursor = buffer.length; }
+          if (!item && !text().trim()) return;
+          if (item && item.args && item.args.startsWith('<')) { buffer = splitInput(item.cmd + ' '); cursor = buffer.length; }
           else { finish(item ? item.cmd : text()); return; }
         }
         else if (key.name === 'tab') {
@@ -196,10 +200,11 @@ export class PromptManager {
     });
   }
 
-  confirm(message, defaultYes = true, { signal, onCancel } = {}) {
+  confirm(message, defaultYes = true, { signal, onCancel, preview } = {}) {
     return new Promise((resolve) => {
       if (signal?.aborted) { resolve(false); return; }
       if (!process.stdin.isTTY) { resolve(false); return; }
+      if (preview) process.stdout.write('\n' + preview + '\n');
       const suffix = defaultYes ? ` [Y/n] ` : ` [y/N] `;
       const rl = readline.createInterface({
         input: process.stdin,
@@ -210,7 +215,7 @@ export class PromptManager {
       signal?.addEventListener('abort', stop, { once: true });
       rl.once('close', () => { signal?.removeEventListener('abort', stop); resolve(false); });
       rl.on('SIGINT', () => { onCancel?.(); rl.close(); });
-      rl.question(`\n${colors.yellow}?${colors.reset} ${message}${colors.dim}${suffix}${colors.reset}`, (ans) => {
+      rl.question(`\n${colors.yellow}?${colors.reset} ${plainText(message)}${colors.dim}${suffix}${colors.reset}`, (ans) => {
         const trimmed = ans.trim().toLowerCase();
         resolve(trimmed ? trimmed === 'y' || trimmed === 'yes' : defaultYes);
         rl.close();

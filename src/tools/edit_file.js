@@ -74,8 +74,7 @@ export async function executeEditFile(args, context = {}) {
   // Show diff & confirm if interactive
   if (!autoApprove && promptManager) {
     const diff = renderDiff(args.file_path, original, newContent);
-    process.stdout.write(`\n${diff}\n\n`);
-    const confirmed = await promptManager.confirm(`Apply changes to ${args.file_path}?`, true, { signal: context.signal, onCancel: context.cancelTurn });
+    const confirmed = await promptManager.confirm(`Apply changes to ${args.file_path}?`, true, { signal: context.signal, onCancel: context.cancelTurn, preview: diff });
     if (!confirmed) {
       return { rejected: true, message: `User rejected edits to ${args.file_path}` };
     }
@@ -83,6 +82,7 @@ export async function executeEditFile(args, context = {}) {
 
   if (context.signal?.aborted) return { rejected: true, message: 'Turn stopped.' };
   try {
+    if (fs.readFileSync(filePath, 'utf8') !== original) return { error: 'File changed while awaiting approval. Read it again and regenerate the edit.' };
     fs.writeFileSync(filePath, newContent, 'utf8');
     return {
       success: true,

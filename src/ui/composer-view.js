@@ -1,4 +1,5 @@
 import { accent, colors, style, cellWidth, plainText, truncate } from './theme.js';
+import { contextLabel } from '../context-window.js';
 
 export function inputLine(text, width, { placeholder = false } = {}) {
   const prefix = accent('› ');
@@ -6,18 +7,28 @@ export function inputLine(text, width, { placeholder = false } = {}) {
   return {prefix, body, row: prefix + body};
 }
 
-export function composerFooter({model = 'poli', mode = 'agent', width, working = false, queued = 0, lines = 1}) {
-  const context = `${plainText(model)} · ${mode === 'chat' ? 'chat' : 'agent'}`;
+export function composerFooter({model = 'poli', mode = 'agent', width, working = false, queued = 0, lines = 1, context}) {
   const hints = working ? `${queued ? `${queued} queued · ` : ''}Enter queue · Esc stop` : 'Enter send · / commands · Ctrl+J newline';
-  return [accent(truncate(context, width - 1)), style.dim(truncate(`${lines > 1 ? `${lines} lines · ` : ''}${hints}`, width - 1))];
+  const usage = contextLabel(context);
+  const contextLine = `${plainText(model)} · ${mode === 'chat' ? 'chat' : 'agent'}`;
+  const room = width - 1;
+  const combined = usage && room >= cellWidth(usage) + 16 ? `${truncate(contextLine, room - cellWidth(usage) - 3)} · ${usage}` : contextLine;
+  return [accent(truncate(combined, room)), ...(usage && combined === contextLine ? [style.dim(truncate(usage, room))] : []), style.dim(truncate(`${lines > 1 ? `${lines} lines · ` : ''}${hints}`, room))];
 }
 
 export function workingStatus(activity, elapsed, frame, width) {
   const brightness = [120, 150, 190, 235, 190, 150][Math.floor(frame / 2) % 6];
   const dot = colors.rgb(70, brightness, 100) + '•' + colors.reset;
-  const label = (activity || 'Working').replace(/…$/, '').split(' · Ctrl+C')[0];
+  const label = (activity || 'Preparing request').replace(/…$/, '').split(' · Ctrl+C')[0];
   const seconds = Math.floor(Number.parseFloat(elapsed) || 0);
   return dot + ' ' + style.dim(truncate(`${label} (${seconds}s · Esc to stop)`, Math.max(1, width - 3)));
+}
+
+export function subagentStatus(agents, width) {
+  const running = agents.filter(agent => agent.status === 'running');
+  if (!running.length) return '';
+  const label = `${running.length} ${running.length === 1 ? 'subagent' : 'subagents'} · ${running.map(agent => `${plainText(agent.label)}: ${plainText(agent.activity)}`).join(' · ')}`;
+  return style.dim(truncate(label, width - 1));
 }
 
 // Normal paints stay relative to the editable row. After resizing, a cursor

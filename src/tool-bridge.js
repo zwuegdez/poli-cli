@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
-import { ALL_TOOLS } from './tools/index.js';
+import { ALL_TOOLS, normalizeToolCall } from './tools/index.js';
 
-export function bridgeInstructions() {
+export function bridgeInstructions(tools = ALL_TOOLS, { native = false } = {}) {
   return `You have working local workspace tools through poli-cli. The CLI executes your requests; you do not execute tools directly. Never ask the user to run your tool call for you.
 
-TOOL REQUEST FORMAT (mandatory for local actions):
+${native ? 'Prefer the native function tools supplied in this request. If native calls are unavailable, the following text bridge is supported as a fallback. Never emit both forms for the same action.' : 'TOOL REQUEST FORMAT (mandatory for local actions):'}
 Emit a separate fenced code block with the EXACT language poli-tool, containing {"name":"tool_name","arguments":{...}}. For example, to read hello.txt emit:
 \`\`\`poli-tool
 {"name":"view_file","arguments":{"file_path":"hello.txt"}}
@@ -15,7 +15,21 @@ To list the workspace emit:
 \`\`\`
 Use the exact parameter names from the schemas below. Ordinary json blocks and prose such as "Tool call: view_file" DO NOT invoke tools. After emitting a request, end your response and wait for the result. The CLI validates requests and asks for approval for changes. You may emit several separate poli-tool blocks. Do not claim success before reading the returned tool result. For greetings and ordinary conversation, answer naturally without requesting a tool. Do not put executable tool blocks in documentation or examples.
 Available local tool schemas:
-${JSON.stringify(ALL_TOOLS.map(t => t.function))}`;
+${native ? 'Use the native schemas supplied with this request for exact argument types and required parameters.' : JSON.stringify(tools.map(t => t.function))}`;
+}
+
+// Some routers produce both a native call and its fenced representation.
+// Execute that action once; preserve intentional repeats within either channel.
+export function combineToolCalls(native = [], bridged = []) {
+  const signature = call => {
+    try {
+      const { name, args } = normalizeToolCall(call.function?.name, JSON.parse(call.function?.arguments || '{}'));
+      const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+      return name + ':' + JSON.stringify(canonical(args));
+    } catch { return null; }
+  };
+  const signatures = new Set(native.map(signature).filter(Boolean));
+  return [...native, ...bridged.filter(call => !signatures.has(signature(call)))];
 }
 
 export function parseBridgeCalls(text) {
@@ -34,7 +48,7 @@ export function parseBridgeCalls(text) {
 }
 
 // Chat-only transports cannot accept role=tool or assistant.tool_calls.
-export function chatMessages(messages, bridge = false, { workspaceDir = process.cwd() } = {}) {
+export function chatMessages(messages, bridge = false, { workspaceDir = process.cwd(), tools = ALL_TOOLS } = {}) {
   const converted = messages.map(m => {
       if (m.role === 'tool') return { role: 'user', content: `Local tool result (${m.name}, call ${m.tool_call_id}):\n${m.content}` };
       if (m.tool_calls) {
@@ -45,7 +59,7 @@ export function chatMessages(messages, bridge = false, { workspaceDir = process.
     });
   if (!bridge) return converted;
   const lastUser = converted.map(m => m.role).lastIndexOf('user');
-  const toolReference = ALL_TOOLS.map(({ function: tool }) => {
+  const toolReference = tools.map(({ function: tool }) => {
     const required = new Set(tool.parameters.required || []);
     const params = Object.keys(tool.parameters.properties || {}).map(key => key + (required.has(key) ? '' : '?'));
     return `${tool.name}(${params.join(', ')})`;
@@ -62,7 +76,11 @@ To list this workspace: \`\`\`poli-tool\n{"name":"list_dir","arguments":{"dir_pa
 You choose the next action for a LOCAL program that can read/edit files and run commands. You do not need direct filesystem access yourself. Generate dedicated poli-tool blocks only for actions needed by the user's task; then wait for real results. For normal chat, just answer naturally. Do not refuse local actions for lack of your own filesystem access.`,
   };
   return [
-    { role: 'system', content: [...converted.filter(m => m.role === 'system').map(m => m.content), bridgeInstructions()].join('\n\n') },
+    { role: 'system', content: [...converted.filter(m => m.role === 'system').map(m => m.content), bridgeInstructions(tools)].join('\n\n') },
     ...converted.filter(m => m.role !== 'system'),
   ];
+}
+
+export function unsupportedTools(error) {
+  return error?.code === 'model_does_not_support_tools' || [400, 422].includes(error?.status) && /(?:tools?|tool_choice|function.call).*(?:not support|unsupported|unknown|unrecognized|not allowed)|(?:not support|unsupported|unknown (?:parameter|field|argument)).*(?:tools?|tool_choice)/i.test(error?.message || '');
 }

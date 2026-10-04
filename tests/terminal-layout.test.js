@@ -7,6 +7,42 @@ import { Spinner } from '../src/ui/spinner.js';
 import { ComposerView, inputLine, composerFooter } from '../src/ui/composer-view.js';
 const { Terminal } = headless;
 
+test('subagent activity grows and shrinks without duplicating the composer or erasing history', async () => {
+  const f = fixture(24, 90);
+  try {
+    f.output.write('AGENT_TRANSCRIPT_KEEP\n'); f.composer.start();
+    f.composer.onKey('draft while agents work', {});
+    for (let index = 0; index < 8; index++) {
+      f.composer.setAgents([{label:'Review',status:'running',activity:index % 2 ? 'Thinking' : 'Using view_file'}]);
+      await f.flush();
+      assert.equal(f.lines().filter(line=>line.includes('draft while agents work')).length,1);
+      assert.equal(f.lines().filter(line=>line.includes('1 subagent')).length,1);
+      f.composer.setAgents([]); await f.flush();
+      assert.equal(f.lines().filter(line=>line.includes('draft while agents work')).length,1);
+      assert.equal(f.lines().filter(line=>line.includes('1 subagent')).length,0);
+      assert.ok(f.lines().includes('AGENT_TRANSCRIPT_KEEP'));
+    }
+  } finally { f.composer.close(); f.terminal.dispose(); }
+});
+
+test('context usage survives animation and resize with one editable draft', async () => {
+  const f=fixture(24,90);
+  try {
+    f.output.write('CONTEXT_TRANSCRIPT_KEEP\n');f.composer.start();
+    f.composer.onKey('context draft',{});
+    f.composer.setContext({usedTokens:12000,limitTokens:128000,percentUsed:10});
+    await f.flush();
+    for(const columns of [40,90,30,110]) {
+      f.terminal.resize(columns,24);f.output.columns=columns;
+      f.composer.view.resize();f.composer.setActivity('Thinking…',2,'3s');
+      await f.flush();
+      assert.equal(f.lines().filter(line=>line.includes('context draft')).length,1,f.lines().join('\n'));
+      assert.equal(f.lines().filter(line=>line.includes('context ~')).length,1,f.lines().join('\n'));
+      assert.ok(f.lines().includes('CONTEXT_TRANSCRIPT_KEEP'));
+    }
+  }finally{f.composer.close();f.terminal.dispose();}
+});
+
 test('changing the indicator color repaints only the prefix and restores the typing cursor', async () => {
   const f = fixture();
   let printed = '';

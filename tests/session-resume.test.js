@@ -42,3 +42,41 @@ test('resuming an interrupted tool batch repairs missing results without executi
   assert.equal(JSON.parse(fresh.messages.at(-1).content).rejected,true);
   assert.match(fresh.messages.at(-1).content,/Inspect the workspace/);
 });
+
+test('atomic session saves retain private permissions and leave no temporary files', t => {
+  const dir=fixture(t);
+  const session=new Session({workspaceDir:dir});
+  session.addMessage({role:'user',content:'First task'});
+  assert.equal(session.save(),true);
+  const file=path.join(dir,'sessions',`session_${session.id}.json`);
+  fs.chmodSync(file,0o644);
+  session.addMessage({role:'assistant',content:'Done'});
+  assert.equal(session.save(),true);
+  assert.equal(fs.statSync(file).mode & 0o777,0o600);
+  assert.equal(Session.read(session.id,dir).messages.at(-1).content,'Done');
+  assert.deepEqual(fs.readdirSync(path.join(dir,'sessions')),[`session_${session.id}.json`]);
+});
+
+test('save failures are exposed and malformed archived messages cannot break a resumed session', t => {
+  const dir=fixture(t);
+  const session=new Session({workspaceDir:dir});
+  session.addMessage({role:'user',content:'Task'});session.save();
+  const file=path.join(dir,'sessions',`session_${session.id}.json`);
+  const record=JSON.parse(fs.readFileSync(file,'utf8'));
+  record.archivedMessages=[{role:'assistant',tool_calls:'broken'}];
+  fs.writeFileSync(file,JSON.stringify(record));
+  assert.throws(()=>Session.read(session.id,dir),/invalid messages/);
+  assert.deepEqual(Session.list(dir),[]);
+  fs.rmSync(path.join(dir,'sessions'),{recursive:true});
+  fs.writeFileSync(path.join(dir,'sessions'),'not a directory');
+  assert.equal(session.save(),false);
+  assert.ok(session.saveError);
+});
+
+test('malformed provider usage cannot corrupt accumulated token statistics', () => {
+  const session=new Session();
+  session.recordUsage({prompt_tokens:'42',completion_tokens:-2,total_tokens:Infinity});
+  assert.deepEqual(session.tokenStats,{promptTokens:0,completionTokens:0,totalTokens:0});
+  session.recordUsage({prompt_tokens:5,completion_tokens:3});
+  assert.equal(session.tokenStats.totalTokens,8);
+});

@@ -6,7 +6,9 @@ import { Session } from '../session.js';
 import { PoliAgent } from '../agent.js';
 import { getSystemPrompt } from '../system-prompt.js';
 import { PromptManager, COMMAND_LIST } from '../ui/prompt.js';
-import { ALL_TOOLS } from '../tools/index.js';
+import { PERMISSION_CHOICES, permissionLevel, permissionLabel } from '../permissions.js';
+import { parseContextLimit } from '../context-window.js';
+import { ALL_TOOLS, executeTool } from '../tools/index.js';
 import { toolDetails } from '../ui/tool-details.js';
 import { renderMarkdown } from '../ui/markdown.js';
 import { banner, colors, style, section, chatMessage, wrapText, terminalWidth } from '../ui/theme.js';
@@ -23,7 +25,7 @@ export async function cmdChat(initialPrompt = null, options = {}) {
   if (options.model) config.model = options.model;
   if (options.mode) config.mode = options.mode;
   if (options.baseUrl) config.baseUrl = options.baseUrl;
-  if (options.yes) config.autoApprove = true;
+  if (options.yes) { config.autoApprove = true; config.permission = 'full'; }
 
   const creds = loadCredentials();
   if (!creds?.apiKey) {
@@ -56,7 +58,7 @@ export async function cmdChat(initialPrompt = null, options = {}) {
   } catch {}
 
   // Initialize session with rich system prompt
-  const sysPrompt = getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode });
+  const sysPrompt = getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode, permission: permissionLevel(config) });
   session.addMessage({ role: 'system', content: sysPrompt });
 
   const agent = new PoliAgent({
@@ -74,10 +76,13 @@ export async function cmdChat(initialPrompt = null, options = {}) {
       Session.read(selected, workspaceDir);
       if (session.messages.some(message => message.role === 'user')) session.save();
       session.restore(selected);
-      const currentPrompt = getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode });
+      agent.subagents.cancelRunning();
+      agent.subagents.jobs.clear();
+      agent.handoff = true;
+      const currentPrompt = getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode, permission: permissionLevel(config) });
       if (session.messages[0]?.role === 'system') session.messages[0].content = currentPrompt;
       else session.messages.unshift({ role: 'system', content: currentPrompt });
-      console.log(style.green(`Resumed ${session.id} · ${session.messages.filter(message => message.role === 'user').length} turns`));
+      console.log(style.green(`Resumed ${session.id} · ${session.history().filter(message => message.role === 'user').length} turns`));
       const last = session.messages.findLast(message => message.role === 'assistant' && message.content);
       if (last) console.log(style.poliBrand() + '\n' + renderMarkdown(String(last.content)) + '\n');
       return true;
@@ -97,6 +102,7 @@ export async function cmdChat(initialPrompt = null, options = {}) {
     cwd: workspaceDir,
     endpoint: config.baseUrl,
     autoApprove: config.autoApprove,
+    permission: permissionLevel(config),
     mode: config.mode,
     branch: gitBranch
   });
@@ -107,6 +113,7 @@ export async function cmdChat(initialPrompt = null, options = {}) {
     const input = await promptManager.promptUser({
       model: config.model,
       mode: config.mode,
+      context: agent.getContext(),
       tokens: session.tokenStats.totalTokens
     });
     const trimmed = input ? input.trim() : '';
@@ -131,15 +138,51 @@ export async function cmdChat(initialPrompt = null, options = {}) {
       }
 
       if (rawCmd === '/clear') {
+        agent.subagents.cancelRunning();
+        agent.subagents.jobs.clear();
         session.clear();
-        session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode }) };
+        agent.handoff = false;
+        agent.historyBudgetTokens = null;
+        session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode, permission: permissionLevel(config) }) };
         process.stdout.write(`\n${colors.green}✔ Conversation context cleared.${colors.reset}\n\n`);
         continue;
       }
 
       if (rawCmd === '/compact') {
-        session.compact();
-        process.stdout.write(`\n${colors.green}✔ Context compacted.${colors.reset} Retained: ${session.messages.length} messages\n\n`);
+        const compacted = session.compact();
+        session.save();
+        console.log('\n' + (compacted ? 'Context compacted. Earlier turns remain searchable with search_history.' : 'Context is already compact. The last four complete turns are kept.') + '\n');
+        continue;
+      }
+
+      if (rawCmd === '/context') {
+        if (arg === 'compact') { session.compact(); session.save(); }
+        else if (arg) {
+          const windows = {...config.contextWindows};
+          if (arg === 'auto') delete windows[config.model];
+          else {
+            const limit = parseContextLimit(arg);
+            if (!limit) { console.log('\nUsage: /context [tokens|auto|compact] · examples: /context 128k, /context auto\n'); continue; }
+            windows[config.model] = limit;
+          }
+          config.contextWindows = windows;
+          saveConfig({contextWindows:windows});
+        }
+        const usage = agent.getContext();
+        const rows = [
+          `Model: ${usage.model}`,
+          `Current input estimate: ~${usage.usedTokens.toLocaleString()} tokens`,
+          `Context window: ${usage.limitTokens ? usage.limitTokens.toLocaleString() + ' tokens (' + usage.limitSource + ')' : 'not supplied by the provider'}`,
+          ...(usage.limitTokens ? [`Estimated remaining: ${Math.max(0, usage.limitTokens - usage.usedTokens).toLocaleString()} tokens (${100 - usage.percentUsed}% before output reserve)`] : []),
+          `Output reserve: ${usage.outputReserve.toLocaleString()} tokens`,
+          `Last provider-reported input: ${usage.reportedPromptTokens == null ? 'not available' : usage.reportedPromptTokens.toLocaleString() + ' tokens'}`,
+          `Messages: ${usage.activeMessages} active · ${usage.archivedMessages} archived`,
+          '',
+          'Estimates include request instructions and tool schemas. They are not tokenizer measurements.',
+          '/context 128k sets a local limit for this model; it does not change the provider’s capacity.',
+          '/context auto uses provider metadata. /context compact archives older turns.',
+        ];
+        console.log('\n' + section('Context window', rows.join('\n')) + '\n');
         continue;
       }
 
@@ -149,8 +192,19 @@ export async function cmdChat(initialPrompt = null, options = {}) {
           config.model = model.id;
           agent.setModel(model);
           saveConfig({ model: model.id });
-          session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: model.id, mode: config.mode }) };
-          process.stdout.write(`\n${style.green('✓')} Active model: ${style.bold(model.id)}\n\n`);
+          session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: model.id, mode: config.mode, permission: permissionLevel(config) }) };
+          process.stdout.write(`\n${style.green('✓')} Active model: ${style.bold(model.id)} · conversation kept\n\n`);
+        }
+        continue;
+      }
+
+      if (['/permission', '/permision', '/permissions'].includes(rawCmd)) {
+        const permission = await selectChoice({ title: 'Permissions', current: permissionLevel(config), choices: PERMISSION_CHOICES });
+        if (permission) {
+          Object.assign(config, { permission, autoApprove: permission === 'full' });
+          saveConfig({ permission, autoApprove: config.autoApprove });
+          session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: config.model, mode: config.mode, permission }) };
+          console.log(`\n${style.green('✓')} Permissions: ${permissionLabel(config)}\n`);
         }
         continue;
       }
@@ -163,7 +217,7 @@ export async function cmdChat(initialPrompt = null, options = {}) {
         if (mode) {
           config.mode = mode;
           saveConfig({ mode });
-          session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: config.model, mode }) };
+          session.messages[0] = { role: 'system', content: getSystemPrompt({ workspaceDir, model: config.model, mode, permission: permissionLevel(config) }) };
           console.log(`\n${style.green('✓')} ${mode === 'chat' ? 'Chat' : 'Agent'} mode\n`);
         }
         continue;
@@ -173,6 +227,13 @@ export async function cmdChat(initialPrompt = null, options = {}) {
         // Continue the pending turn after errors, cancellation, or output truncation.
         const last = session.messages.at(-1);
         await agent.runTurn(last?.role === 'assistant' ? 'Continue your previous answer or unfinished task.' : null);
+        continue;
+      }
+
+      if (rawCmd === '/agents') {
+        const current = agent.subagents.list_agents().agents;
+        const jobs = [...current,...session.subagentRecords.filter(record=>!current.some(job=>job.agent_id===record.agent_id))];
+        console.log('\n' + (jobs.length ? jobs.map(job => `${job.agent_id} · ${job.status} · ${job.role} · ${job.model}\n  ${job.label}`).join('\n') : 'No subagents yet. Ask Poli to delegate a task.') + '\n');
         continue;
       }
 
@@ -197,7 +258,8 @@ export async function cmdChat(initialPrompt = null, options = {}) {
       }
 
       if (rawCmd === '/diff') {
-        showGitDiff(workspaceDir);
+        const result = await executeTool('git_diff', {}, { workspaceDir, permission: permissionLevel(config) });
+        process.stdout.write('\n' + (result.error || result.content) + '\n\n');
         continue;
       }
 
@@ -205,7 +267,8 @@ export async function cmdChat(initialPrompt = null, options = {}) {
         if (!arg) {
           process.stdout.write(`\n${colors.red}Usage: /run <command>${colors.reset}\n\n`);
         } else {
-          runDirectCommand(arg, workspaceDir);
+          const result = await executeTool('run_command', { command: arg }, { workspaceDir, promptManager, permission: permissionLevel(config) });
+          process.stdout.write('\n' + (result.message || result.error || '') + (result.stdout || '') + (result.stderr || '') + '\n');
         }
         continue;
       }
@@ -301,8 +364,9 @@ function printToolsList() {
 }
 
 function printHistory(session) {
-  process.stdout.write(`\n${colors.bold}Conversation History (${session.messages.length} messages):${colors.reset}\n\n`);
-  for (const m of session.messages) {
+  const history = session.history();
+  process.stdout.write(`\n${colors.bold}Conversation History (${history.filter(message => message.role !== 'system').length} messages):${colors.reset}\n\n`);
+  for (const m of history) {
     if (m.role === 'system') continue;
     const roleColor = m.role === 'user'
       ? colors.brightCyan
@@ -317,29 +381,6 @@ function printHistory(session) {
   process.stdout.write('\n');
 }
 
-function showGitDiff(cwd) {
-  try {
-    const diff = execSync('git diff', { cwd, encoding: 'utf8', timeout: 5000 });
-    if (!diff.trim()) {
-      process.stdout.write(`\n${colors.green}✔ Working directory is clean. No uncommitted git changes.${colors.reset}\n\n`);
-    } else {
-      process.stdout.write(`\n${diff}\n\n`);
-    }
-  } catch (err) {
-    process.stderr.write(`Failed to get git diff: ${err.message}\n`);
-  }
-}
-
-function runDirectCommand(cmd, cwd) {
-  try {
-    process.stdout.write(`\n${colors.dim}$ ${cmd}${colors.reset}\n`);
-    execSync(cmd, { cwd, encoding: 'utf8', stdio: 'inherit' });
-  } catch (err) {
-    // stdio inherit already prints
-  }
-  process.stdout.write('\n');
-}
-
 function printSessionStatus(session, config, branch) {
   const content = [
     `${colors.dim}Session ID:${colors.reset}        ${session.id}`,
@@ -348,7 +389,7 @@ function printSessionStatus(session, config, branch) {
     `${colors.dim}Router Endpoint:${colors.reset}   ${colors.cyan}${config.baseUrl}${colors.reset}`,
     `${colors.dim}Workspace:${colors.reset}         ${session.workspaceDir}`,
     `${colors.dim}Git Branch:${colors.reset}        ${branch || '(none)'}`,
-    `${colors.dim}Auto-approve:${colors.reset}      ${config.autoApprove ? colors.yellow + 'Yes (-y)' : colors.gray + 'No'}${colors.reset}`,
+    `${colors.dim}Permissions:${colors.reset}       ${permissionLabel(config)}`,
     `${colors.dim}Total Messages:${colors.reset}    ${session.messages.length}`,
     `${colors.dim}Total Tokens:${colors.reset}      ${colors.bold}${session.tokenStats.totalTokens.toLocaleString()}${colors.reset}`
   ].join('\n');

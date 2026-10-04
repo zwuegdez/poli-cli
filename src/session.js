@@ -1,8 +1,11 @@
+import { contextHandoff } from './context-handoff.js';
 // Session and conversation history manager
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { getSessionsDir } from './config.js';
+
+const validMessage = message => message && ['system', 'user', 'assistant', 'tool'].includes(message.role) && (message.tool_calls == null || Array.isArray(message.tool_calls) && message.tool_calls.every(call => typeof call?.id === 'string' && typeof call.function?.name === 'string'));
 
 export class Session {
   constructor({ id = null, workspaceDir = process.cwd() } = {}) {
@@ -11,6 +14,9 @@ export class Session {
     this.workspaceDir = workspaceDir;
     this.createdAt = new Date().toISOString();
     this.messages = [];
+    this.archivedMessages = [];
+    this.contextUsage = null;
+    this.subagentRecords = [];
     this.tokenStats = {
       promptTokens: 0,
       completionTokens: 0,
@@ -26,7 +32,8 @@ export class Session {
     if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('Invalid session ID.');
     const record = JSON.parse(fs.readFileSync(path.join(getSessionsDir(), `session_${id}.json`), 'utf8'));
     if (record.id !== id || typeof record.workspaceDir !== 'string' || path.resolve(record.workspaceDir) !== path.resolve(workspaceDir)) throw new Error('Session belongs to a different workspace.');
-    if (!Array.isArray(record.messages) || !record.messages.every(message => message && ['system', 'user', 'assistant', 'tool'].includes(message.role) && (message.tool_calls == null || Array.isArray(message.tool_calls) && message.tool_calls.every(call => typeof call?.id === 'string' && typeof call.function?.name === 'string')))) throw new Error('Session contains invalid messages.');
+    if (!Array.isArray(record.messages) || !record.messages.every(validMessage) || record.archivedMessages != null && (!Array.isArray(record.archivedMessages) || !record.archivedMessages.every(validMessage))) throw new Error('Session contains invalid messages.');
+    if (record.subagentRecords != null && (!Array.isArray(record.subagentRecords) || !record.subagentRecords.every(agent => typeof agent?.agent_id === 'string' && Array.isArray(agent.messages) && agent.messages.every(validMessage)))) throw new Error('Session contains invalid subagent records.');
     return record;
   }
 
@@ -39,7 +46,7 @@ export class Session {
       if (!id) continue;
       try {
         const record = Session.read(id, workspaceDir);
-        const users = record.messages.filter(message => message.role === 'user');
+        const users = [...(record.archivedMessages || []), ...record.messages].filter(message => message.role === 'user');
         if (!users.length) continue;
         const updatedAt = typeof record.updatedAt === 'string' ? record.updatedAt : typeof record.createdAt === 'string' ? record.createdAt : '';
         records.push({ id, updatedAt, turns: users.length, preview: String(users.at(-1).content || 'Conversation') });
@@ -51,7 +58,10 @@ export class Session {
   restore(id) {
     const record = Session.read(id, this.workspaceDir);
     this.id = record.id;
+    this.archivedMessages = Array.isArray(record.archivedMessages) ? record.archivedMessages.filter(message => message && ['user', 'assistant', 'tool'].includes(message.role)) : [];
     this.createdAt = typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString();
+    this.contextUsage = record.contextUsage && typeof record.contextUsage.model === 'string' && Number.isFinite(record.contextUsage.promptTokens) && record.contextUsage.promptTokens >= 0 ? record.contextUsage : null;
+    this.subagentRecords = record.subagentRecords || [];
     this.messages = [];
     const pending = new Map();
     const closePending = () => {
@@ -71,14 +81,31 @@ export class Session {
     }
   }
 
+  history() { return [...this.archivedMessages, ...this.messages]; }
+  searchableHistory() {
+    return [...this.history(), ...this.subagentRecords.flatMap(agent=>agent.messages.map(message=>({...message,scope:{agent_id:agent.agent_id,label:agent.label,model:agent.model}})))];
+  }
+  recordSubagent(record) {
+    const at=this.subagentRecords.findIndex(agent=>agent.agent_id===record.agent_id);
+    if(at>=0)this.subagentRecords[at]=record;else this.subagentRecords.push(record);
+  }
+
   recordUsage(usage) {
     if (!usage) return;
-    this.tokenStats.promptTokens += usage.prompt_tokens || 0;
-    this.tokenStats.completionTokens += usage.completion_tokens || 0;
-    this.tokenStats.totalTokens += usage.total_tokens || 0;
+    const valid = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    const prompt = valid(usage.prompt_tokens), completion = valid(usage.completion_tokens);
+    this.tokenStats.promptTokens += prompt;
+    this.tokenStats.completionTokens += completion;
+    this.tokenStats.totalTokens += valid(usage.total_tokens) || prompt + completion;
+  }
+
+  recordContextUsage(usage, model) {
+    if (!Number.isFinite(usage?.prompt_tokens) || usage.prompt_tokens < 0) return;
+    this.contextUsage = { model, promptTokens: usage.prompt_tokens, completionTokens: Number.isFinite(usage.completion_tokens) && usage.completion_tokens >= 0 ? usage.completion_tokens : null };
   }
 
   save() {
+    let temporary;
     try {
       const dir = getSessionsDir();
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -89,10 +116,21 @@ export class Session {
         createdAt: this.createdAt,
         updatedAt: new Date().toISOString(),
         tokenStats: this.tokenStats,
+        archivedMessages: this.archivedMessages,
+        contextUsage: this.contextUsage,
+        subagentRecords: this.subagentRecords,
         messages: this.messages
       };
-      fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), { mode: 0o600 });
-    } catch {}
+      temporary = filePath + '.' + process.pid + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
+      fs.writeFileSync(temporary, JSON.stringify(payload, null, 2), { mode: 0o600, flag: 'wx' });
+      fs.renameSync(temporary, filePath);
+      this.saveError = null;
+      return true;
+    } catch (error) {
+      this.saveError = error.message;
+      if (temporary) try { fs.unlinkSync(temporary); } catch {}
+      return false;
+    }
   }
 
   compact() {
@@ -101,15 +139,19 @@ export class Session {
     if (starts.length <= 4) return false;
     const cut = starts.at(-4);
     const first = this.messages[0]?.role === 'system' ? this.messages[0] : null;
+    this.archivedMessages.push(...this.messages.slice(0, cut).filter(message => message.role !== 'system'));
     this.messages = [
       ...(first ? [first] : []),
-      { role: 'system', content: `[Earlier conversation omitted to save context. ${starts.length - 4} older user turns were removed; their contents are not available.]` },
+      { role: 'system', content: `Earlier conversation was compacted. Recorded handoff:\n${contextHandoff(this.archivedMessages)}` },
       ...this.messages.slice(cut),
     ];
     return true;
   }
 
   clear() {
+    this.archivedMessages = [];
+    this.contextUsage = null;
+    this.subagentRecords = [];
     const firstMsg = this.messages[0]?.role === 'system' ? this.messages[0] : null;
     this.messages = firstMsg ? [firstMsg] : [];
   }

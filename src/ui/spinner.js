@@ -41,7 +41,7 @@ export class Spinner {
   }
 
   render() {
-    if (!this.stream.isTTY) return;
+    if (!this.stream.isTTY || this.stream.poliApprovalActive) return;
     if (this.stream.poliTurnInput?.active) {
       this.stream.poliTurnInput.setActivity(this.text, this.frameIndex, ((Date.now() - this.startTime) / 1000).toFixed(1) + 's');
       return;
@@ -57,7 +57,7 @@ export class Spinner {
     clearInterval(this.timer);
     this.timer = null;
     this.isSpinning = false;
-    if (this.stream.isTTY) {
+    if (this.stream.isTTY && !this.stream.poliApprovalActive) {
       if (this.stream.poliTurnInput?.active) this.stream.poliTurnInput.setActivity('');
       else this.stream.write('\r\x1b[2K');
     }

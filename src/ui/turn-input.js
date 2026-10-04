@@ -1,5 +1,5 @@
 import readline from 'node:readline';
-import { ComposerView, inputLine, composerFooter, workingStatus } from './composer-view.js';
+import { ComposerView, inputLine, composerFooter, workingStatus, subagentStatus } from './composer-view.js';
 import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
 
 // Keep activity, input, and model hints together after the transcript. Use normal scrolling so
@@ -15,6 +15,7 @@ export class TurnInput {
     this.viewStart = 0;
     this.pasting = false;
     this.paste = '';
+    this.agents = [];
     this.onKey = this.onKey.bind(this);
     this.onResize = this.onResize.bind(this);
   }
@@ -66,7 +67,9 @@ export class TurnInput {
     this.viewStart = input.start;
     const placeholder = 'Ask Poli to build, fix, or explain…';
     const line = inputLine(this.buffer.length ? input.text : placeholder, width, {placeholder: !this.buffer.length});
-    const rows = [workingStatus(this.activity, this.elapsed, this.frameIndex || 0, width), '', ...composerFooter({model: this.model, mode: this.mode, width, working: true, queued: this.queue.length, lines: input.lines}), line.row];
+    const agentLine = subagentStatus(this.agents, width);
+    const agentRow = agentLine ? [agentLine] : [];
+    const rows = [workingStatus(this.activity, this.elapsed, this.frameIndex || 0, width), ...agentRow, '', ...composerFooter({model: this.model, mode: this.mode, width, working: true, queued: this.queue.length, lines: input.lines, context: this.context}), line.row];
     this.view.paint(rows, rows.length - 1, 2 + input.cursorColumn, line);
   }
   setActivity(text, frame = 0, elapsed = '') {
@@ -76,6 +79,8 @@ export class TurnInput {
     this.elapsed = elapsed;
     this.draw();
   }
+  setAgents(agents) { this.agents = agents; this.draw(); }
+  setContext(context) { this.context = context; this.draw(); }
   onResize() {
     if (!this.active) return;
     this.view.queueResize(() => {

@@ -27,7 +27,33 @@ export class ComposerView {
   get renderable() {
     // Mobile clients can briefly report a one-row or zero-sized window while
     // switching apps. Painting a multi-row composer then scrolls it into history.
-    return (this.output.columns ?? 80) >= 12 && (this.output.rows ?? 24) >= 8;
+    return !this.resizing && (this.output.columns ?? 80) >= 12 && (this.output.rows ?? 24) >= 8;
+  }
+  queueResize(redraw) {
+    this.resizing = true;
+    clearTimeout(this.resizeTimer);
+    if (!this.resizePending) this.resizePending = new Promise(resolve => { this.resizeResolved = resolve; });
+    this.resizeTimer = setTimeout(() => {
+      this.resizeTimer = null;
+      this.resizing = false;
+      this.resize();
+      try { redraw(); }
+      finally {
+        const resolve = this.resizeResolved;
+        this.resizePending = null;
+        this.resizeResolved = null;
+        resolve?.();
+      }
+    }, 300);
+  }
+  settled() { return this.resizePending || Promise.resolve(); }
+  dispose() {
+    clearTimeout(this.resizeTimer);
+    this.resizeTimer = null;
+    this.resizing = false;
+    this.resizeResolved?.();
+    this.resizePending = null;
+    this.resizeResolved = null;
   }
   clear() {
     if (!this.renderable) return;

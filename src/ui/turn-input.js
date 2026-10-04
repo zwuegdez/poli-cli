@@ -77,10 +77,12 @@ export class TurnInput {
     this.draw();
   }
   onResize() {
-    if (!this.active || !this.view.renderable) return;
-    this.view.resize();
-    this.flushOutput();
-    this.draw();
+    if (!this.active) return;
+    this.view.queueResize(() => {
+      if (!this.active) return;
+      this.flushOutput();
+      this.draw();
+    });
   }
   insert(text) {
     const left = this.buffer.slice(0, this.cursor).join('') + normalizeInput(text);
@@ -123,6 +125,7 @@ export class TurnInput {
   }
   suspend() {
     if (!this.active) return;
+    this.view.dispose();
     this.output.write = this.stdoutWrite;
     if (this.error !== this.output && this.error.isTTY) this.error.write = this.stderrWrite;
     this.input.removeListener('keypress', this.onKey);

@@ -93,6 +93,49 @@ test('streaming during a hidden tiny window buffers output and restores one draf
   } finally { f.composer.close(); f.terminal.dispose(); }
 });
 
+test('the recorded reconnect geometry burst redraws idle input once after settling', async () => {
+  const f = fixture(24, 120);
+  const view = new ComposerView(f.output, text => f.output.write(text));
+  const paint = () => view.paint(['', inputLine('Ask Poli to build, fix, or explain…', f.output.columns, {placeholder: true}).row, ...composerFooter({model: 'cbai/hy4-preview', width: f.output.columns})], 1, 2);
+  let printed = '';
+  f.output.on('data', chunk => { printed += String(chunk); });
+  try {
+    for (let i = 0; i < 80; i++) f.output.write(`BURST_HISTORY_${i}\n`);
+    paint(); await f.flush(); printed = '';
+    for (const [cols, rows] of [[120, 22], [120, 45], [70, 69], [70, 47], [120, 24], [120, 45], [120, 22]]) {
+      f.terminal.resize(cols, rows); f.output.columns = cols; f.output.rows = rows;
+      view.queueResize(paint);
+      paint(); // Keypresses during the resize burst must not paint extra inputs.
+    }
+    assert.equal(printed, '');
+    await view.settled(); await f.flush();
+    assert.equal(printed.split('Ask Poli to build').length - 1, 1);
+    assert.equal(f.lines().filter(line => line.includes('Ask Poli to build')).length, 1);
+    for (let i = 0; i < 80; i++) assert.ok(f.lines().includes(`BURST_HISTORY_${i}`));
+  } finally { view.dispose(); f.terminal.dispose(); }
+});
+
+test('reconnect bursts buffer progress and animate again with one working draft', async () => {
+  const f = fixture(24, 120);
+  let printed = '';
+  f.output.on('data', chunk => { printed += String(chunk); });
+  try {
+    f.output.write('BURST_WORK_HISTORY_KEEP\n'); f.composer.start();
+    f.composer.onKey('one working draft', {}); await f.flush(); printed = '';
+    for (const [cols, rows] of [[120, 45], [70, 69], [70, 47], [120, 24], [120, 22]]) {
+      f.terminal.resize(cols, rows); f.output.columns = cols; f.output.rows = rows;
+      f.composer.onResize(); f.composer.setActivity('Replying…', 3, '2s');
+    }
+    f.output.write('BURST_PROGRESS_KEEP\n');
+    assert.equal(printed, '');
+    await f.flush();
+    assert.equal(printed.split('one working draft').length - 1, 1);
+    assert.equal(f.lines().filter(line => line.includes('one working draft')).length, 1);
+    assert.ok(f.lines().includes('BURST_WORK_HISTORY_KEEP'));
+    assert.ok(f.lines().includes('BURST_PROGRESS_KEEP'));
+  } finally { f.composer.close(); f.terminal.dispose(); }
+});
+
 function fixture(rows = 24, cols = 80, terminalOptions = {}) {
   const terminal = new Terminal({ rows, cols, scrollback: 1000, convertEol: true, allowProposedApi: true, ...terminalOptions });
   const input = new PassThrough(); input.isTTY = true; input.isRaw = false;
@@ -100,7 +143,10 @@ function fixture(rows = 24, cols = 80, terminalOptions = {}) {
   const output = new PassThrough(); output.isTTY = true; output.rows = rows; output.columns = cols;
   output.on('data', data => terminal.write(String(data)));
   const composer = new TurnInput({controller: new AbortController(), input, output, error: output});
-  const flush = () => new Promise(resolve => terminal.write('', resolve));
+  const flush = async () => {
+    await composer.view?.settled();
+    await new Promise(resolve => terminal.write('', resolve));
+  };
   const lines = () => Array.from({length: terminal.buffer.active.length}, (_, i) => terminal.buffer.active.getLine(i)?.translateToString(true) || '');
   return { terminal, input, output, composer, flush, lines };
 }

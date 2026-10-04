@@ -124,8 +124,9 @@ export class PromptManager {
         }
         view.paint(rows, 1, 2 + input.cursorColumn, line);
       };
-      const onResize = () => { view.resize(); render(); };
+      const onResize = () => view.queueResize(render);
       const finish = (value) => {
+        view.dispose();
         view.clear();
         stdin.removeListener('keypress', onKey);
         stdout.removeListener('resize', onResize);

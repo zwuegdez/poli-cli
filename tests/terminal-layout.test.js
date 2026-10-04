@@ -4,7 +4,7 @@ import { PassThrough } from 'node:stream';
 import headless from '@xterm/headless';
 import { TurnInput } from '../src/ui/turn-input.js';
 import { Spinner } from '../src/ui/spinner.js';
-import { ComposerView, inputLine } from '../src/ui/composer-view.js';
+import { ComposerView, inputLine, composerFooter } from '../src/ui/composer-view.js';
 const { Terminal } = headless;
 
 test('changing the indicator color repaints only the prefix and restores the typing cursor', async () => {
@@ -31,9 +31,9 @@ test('idle input and slash menu survive mobile reflow without stale rows', async
   const f = fixture(24, 110);
   const view = new ComposerView(f.output, text => f.output.write(text));
   const paint = (menu = false) => {
-    const rows = [inputLine('idle draft', f.output.columns).row];
+    const rows = ['', inputLine('idle draft', f.output.columns).row, ...composerFooter({model: 'demo', width: f.output.columns})];
     if (menu) rows.push('  › /models', '    /mode');
-    view.paint(rows, 0, 12);
+    view.paint(rows, 1, 12);
   };
   try {
     f.output.write('IDLE_TRANSCRIPT_KEEP\n'); paint(); await f.flush();
@@ -69,7 +69,7 @@ for (const windowsMode of [false, true]) {
   test(`reconnecting preserves one idle composer when terminal reflow is ${windowsMode ? 'disabled' : 'enabled'}`, async () => {
     const f = fixture(52, 110, {windowsMode});
     const view = new ComposerView(f.output, text => f.output.write(text));
-    const paint = () => view.paint([inputLine('Write a message…', f.output.columns, {placeholder: true}).row], 0, 2);
+    const paint = () => view.paint(['', inputLine('Ask Poli to build, fix, or explain…', f.output.columns, {placeholder: true}).row, ...composerFooter({model: 'demo', width: f.output.columns})], 1, 2);
     try {
       for (let i = 0; i < 70; i++) f.output.write(`RECONNECT_HISTORY_${i}\n`);
       paint(); await f.flush();
@@ -77,11 +77,11 @@ for (const windowsMode of [false, true]) {
         f.terminal.resize(cols, rows); f.output.columns = cols; f.output.rows = rows;
         view.resize(); paint(); await f.flush();
         const lines = f.lines();
-        assert.equal(lines.filter(line => line.includes('Write a message')).length, 1, lines.join('\n'));
+        assert.equal(lines.filter(line => line.includes('Ask Poli to build')).length, 1, lines.join('\n'));
         for (let i = 0; i < 70; i++) assert.ok(lines.includes(`RECONNECT_HISTORY_${i}`), lines.join('\n'));
       }
       view.clear(); await f.flush();
-      assert.ok(!f.lines().some(line => line.includes('Write a message')));
+      assert.ok(!f.lines().some(line => line.includes('Ask Poli to build')));
     } finally { f.terminal.dispose(); }
   });
 }
@@ -146,11 +146,11 @@ test('resizing does not leave an old working footer in the conversation', async 
     f.output.write('HEADER_KEEP\n');
     f.composer.start();f.output.write('BEFORE_RESIZE_KEEP\n');await f.flush();
     f.terminal.resize(80, 30);f.output.rows=30;f.composer.onResize();await f.flush();
-    assert.equal(f.lines().filter(line=>line.includes('Write a message')).length,1,f.lines().join('\n'));
+    assert.equal(f.lines().filter(line=>line.includes('Ask Poli to build')).length,1,f.lines().join('\n'));
     f.output.write('AFTER_RESIZE_KEEP\n');f.composer.close();f.output.write('NEXT_PROMPT_KEEP\n');await f.flush();
     const lines=f.lines();
     for(const marker of ['HEADER_KEEP','BEFORE_RESIZE_KEEP','AFTER_RESIZE_KEEP','NEXT_PROMPT_KEEP'])assert.ok(lines.includes(marker),lines.join('\n'));
-    assert.equal(lines.filter(line=>line.includes('Write a message')).length,0,lines.join('\n'));
+    assert.equal(lines.filter(line=>line.includes('Ask Poli to build')).length,0,lines.join('\n'));
   } finally { f.composer.close();f.terminal.dispose(); }
 });
 
@@ -165,7 +165,7 @@ test('shrinking terminal height preserves the answer, draft, and restored cursor
     const lines=f.lines();
     for(const marker of ['HEADER_KEEP','BEFORE_SHRINK_KEEP','AFTER_SHRINK_KEEP','NEXT_PROMPT_KEEP'])assert.ok(lines.includes(marker),lines.join('\n'));
     assert.equal(f.composer.draft(),'my draft');
-    assert.equal(lines.filter(line=>line.includes('Write a message')).length,0,lines.join('\n'));
+    assert.equal(lines.filter(line=>line.includes('Ask Poli to build')).length,0,lines.join('\n'));
   } finally { f.composer.close();f.terminal.dispose(); }
 });
 
@@ -222,7 +222,7 @@ test('partial output and animated tool status never overwrite messages or drafts
     for (let i = 0; i < 10; i++) { spinner.frameIndex = i; spinner.render(); }
     await f.flush();
     const editableLine = f.lines().find(line => line.includes('follow-up draft'));
-    assert.ok(editableLine?.startsWith('● › follow-up draft'));
+    assert.ok(editableLine?.startsWith('› follow-up draft'));
     assert.ok(!editableLine.includes('Running view_file'));
     f.output.write('MESSAGE_KEEP\n');
     f.output.write('UNTERMINATED_KEEP');
@@ -236,7 +236,7 @@ test('partial output and animated tool status never overwrite messages or drafts
   } finally { spinner.stop(); f.composer.close(); f.terminal.dispose(); }
 });
 
-test('pulsing indicator stays beside one draft without repainting the input', async () => {
+test('Codex-style activity and model footer surround the draft without repainting it', async () => {
   const f = fixture(12, 80);
   let printed = '';
   f.output.on('data', chunk => { printed += String(chunk); });
@@ -254,14 +254,16 @@ test('pulsing indicator stays beside one draft without repainting the input', as
     assert.ok(lines.includes('TRANSCRIPT_KEEP'));
     const inputRow = lines.findIndex(line => line.includes(draft));
     assert.ok(inputRow > 0);
-    assert.ok(lines[inputRow].startsWith('● › '));
-    assert.ok(!lines.some(line => line.includes('Replying')));
-    assert.equal(f.terminal.buffer.active.cursorX, draft.length + 4);
+    assert.ok(lines[inputRow].startsWith('› '));
+    assert.match(lines[inputRow - 2], /• Replying \(1s · Esc to stop\)/);
+    assert.equal(lines[inputRow - 1], '');
+    assert.match(lines[inputRow + 1], /poli · agent/);
+    assert.match(lines[inputRow + 2], /Enter queue · Esc stop/);
+    assert.equal(f.terminal.buffer.active.cursorX, draft.length + 2);
     assert.ok(!printed.includes(draft), 'animation must not rewrite the draft');
     f.composer.onKey('\r', {name: 'return'});
     await f.flush();
     assert.ok(f.lines().some(line => line.includes('1 queued')));
-    assert.ok(f.lines().some(line => line.includes('queued · Write another')));
     assert.deepEqual(f.composer.drain(), [draft]);
   } finally { f.composer.close(); f.terminal.dispose(); }
 });
@@ -277,7 +279,7 @@ test('narrowing the terminal removes reflowed input hints without deleting the t
     f.terminal.resize(30, 24); f.output.columns = 30; f.composer.onResize();
     await f.flush();
     assert.ok(f.lines().includes('TRANSCRIPT_KEEP'));
-    assert.equal(f.lines().filter(line => line.includes('Write a message')).length, 1);
+    assert.equal(f.lines().filter(line => line.includes('Ask Poli to build')).length, 1);
     f.output.write('AFTER_NARROW_KEEP\n'); f.composer.close(); await f.flush();
     assert.ok(f.lines().includes('TRANSCRIPT_KEEP'));
     assert.ok(f.lines().includes('AFTER_NARROW_KEEP'));

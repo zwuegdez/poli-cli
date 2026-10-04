@@ -204,14 +204,14 @@ sessions from other workspaces are excluded. An interrupted tool batch gets expl
 stopped results for unfinished calls; resuming never silently executes those calls.
 
 ### Input and status
-Idle and working input use one borderless writing row with bright green text and
-`Write a message…` as its placeholder. During work, a small green dot pulses beside
-the prompt; only the dot is repainted as it animates. Model and mode are shown in the
-welcome screen and available through `/status`. Enter queues a follow-up during work,
-and the empty input shows the queue count. Ctrl+J inserts a newline and Esc stops the
-current response. Slash suggestions appear beneath the writing row when requested.
-The input has no background bar or permanent footer rows, and uses normal terminal
-scrollback. `NO_COLOR=1` keeps the same layout without color.
+The composer follows a Codex-style layout: a separate animated activity line during
+work, a blank line, a plain `›` input, and compact model/mode and shortcut rows below.
+There are no frames or background bars. Green accents highlight the prompt and model;
+message text uses the terminal's foreground. The activity line shows elapsed time and
+Esc to stop. Enter queues follow-ups during work, with the count shown below the input.
+Ctrl+J inserts a newline; slash suggestions open beneath the composer. Animation
+updates the activity row without rewriting the draft. The layout uses native terminal
+scrollback and adapts to mobile keyboard size changes.
 Without an interactive terminal, changes requiring approval are declined unless `-y`
 is supplied. Requests time out after 120 seconds by default; configure
 `requestTimeoutMs` if your model needs more time. Shell commands default to 120 seconds;

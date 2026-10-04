@@ -261,7 +261,7 @@ export function box(title, content, options = {}) {
   return [top, ...rows, `${borderColor}╰${'─'.repeat(width - 2)}╯${colors.reset}`].join('\n');
 }
 
-export function banner({ version = '1.2.0', model = 'gpt-6.1-sol', cwd = process.cwd(), branch = '', autoApprove = false, mode = 'agent' } = {}) {
+export function banner({ version = '1.3.0', model = 'gpt-6.1-sol', cwd = process.cwd(), branch = '', autoApprove = false, mode = 'agent' } = {}) {
   const width = terminalWidth();
   const rows = [];
   const brand = style.poliBrand();
@@ -300,15 +300,7 @@ export function banner({ version = '1.2.0', model = 'gpt-6.1-sol', cwd = process
   rows.push(`${style.dim(approvalPrefix)}${style.bold(approval)}`);
 
   rows.push('');
-  rows.push(style.dim('─'.repeat(Math.min(width, 52))));
-  if (width >= 20) {
-    rows.push(...wrapText(style.bold('Ready when you are.'), width));
-    rows.push(...wrapText('Describe a task or ask a question in this workspace.', width).map(style.dim));
-    rows.push(...wrapText('Enter to send · / commands · ↑↓ history', width).map(style.dim));
-  } else {
-    rows.push(...wrapText(style.bold('Ready.'), width));
-    rows.push(...wrapText('Type / for help.', width).map(style.dim));
-  }
+  rows.push(...wrapText('Type / for commands · /models to choose a model.', width).map(style.dim));
   return rows.join('\n');
 }
 

@@ -1,10 +1,23 @@
-import { accent, colors, cellWidth, plainText, truncate } from './theme.js';
+import { accent, colors, style, cellWidth, plainText, truncate } from './theme.js';
 
-export function inputLine(text, width, { placeholder = false, working = false, frame = 0 } = {}) {
-  const brightness = [120, 150, 190, 235, 190, 150][Math.floor(frame / 2) % 6];
-  const prefix = (working ? colors.rgb(70, brightness, 100) + '● ' + colors.reset : '  ') + accent('› ');
-  const body = (placeholder ? colors.rgb(125, 165, 133) : colors.rgb(190, 255, 174)) + truncate(plainText(text), Math.max(1, width - 5)) + colors.reset;
+export function inputLine(text, width, { placeholder = false } = {}) {
+  const prefix = accent('› ');
+  const body = (placeholder ? colors.dim : '') + truncate(plainText(text), Math.max(1, width - 3)) + colors.reset;
   return {prefix, body, row: prefix + body};
+}
+
+export function composerFooter({model = 'poli', mode = 'agent', width, working = false, queued = 0, lines = 1}) {
+  const context = `${plainText(model)} · ${mode === 'chat' ? 'chat' : 'agent'}`;
+  const hints = working ? `${queued ? `${queued} queued · ` : ''}Enter queue · Esc stop` : 'Enter send · / commands · Ctrl+J newline';
+  return [accent(truncate(context, width - 1)), style.dim(truncate(`${lines > 1 ? `${lines} lines · ` : ''}${hints}`, width - 1))];
+}
+
+export function workingStatus(activity, elapsed, frame, width) {
+  const brightness = [120, 150, 190, 235, 190, 150][Math.floor(frame / 2) % 6];
+  const dot = colors.rgb(70, brightness, 100) + '•' + colors.reset;
+  const label = (activity || 'Working').replace(/…$/, '').split(' · Ctrl+C')[0];
+  const seconds = Math.floor(Number.parseFloat(elapsed) || 0);
+  return dot + ' ' + style.dim(truncate(`${label} (${seconds}s · Esc to stop)`, Math.max(1, width - 3)));
 }
 
 // All positions are relative to the editable row. No alternate screen, scroll
@@ -40,8 +53,9 @@ export class ComposerView {
   resize() {
     if (!this.visible) return;
     const width = Math.max(8, this.output.columns || 80);
-    // Terminal reflow shifts the cursor by added rows even below the caret.
-    const extra = this.rows.reduce((sum, row) => sum + Math.max(0, Math.ceil(cellWidth(row) / width) - 1), 0);
+    // Shell terminals leave the editable cursor row for the application to
+    // redraw; only the surrounding rows contribute to automatic reflow.
+    const extra = this.rows.reduce((sum, row, index) => sum + (index === this.inputRow ? 0 : Math.max(0, Math.ceil(cellWidth(row) / width) - 1)), 0);
     const up = this.inputRow + extra;
     this.write('\r' + (up ? `\x1b[${up}A` : '') + '\x1b[J');
     this.visible = false;

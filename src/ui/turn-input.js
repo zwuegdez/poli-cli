@@ -1,8 +1,8 @@
 import readline from 'node:readline';
-import { ComposerView, inputLine } from './composer-view.js';
+import { ComposerView, inputLine, composerFooter, workingStatus } from './composer-view.js';
 import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
 
-// Keep one editable row after the transcript. Use normal scrolling so
+// Keep activity, input, and model hints together after the transcript. Use normal scrolling so
 // every completed output line enters native scrollback; never set scroll margins.
 export class TurnInput {
   constructor({ controller, onSubmit, onDetails, model = 'poli', mode = 'agent', input = process.stdin, output = process.stdout, error = process.stderr }) {
@@ -59,11 +59,12 @@ export class TurnInput {
   draw() {
     if (!this.active) return;
     const width = Math.max(8, this.output.columns || 80);
-    const input = inputViewport(this.buffer, this.cursor, width - 6, this.viewStart);
+    const input = inputViewport(this.buffer, this.cursor, width - 4, this.viewStart);
     this.viewStart = input.start;
-    const placeholder = this.queue.length ? `${this.queue.length} queued · Write another…` : 'Write a message…';
-    const line = inputLine(this.buffer.length ? input.text : placeholder, width, {placeholder: !this.buffer.length, working: true, frame: this.frameIndex || 0});
-    this.view.paint([line.row], 0, 4 + input.cursorColumn, line);
+    const placeholder = 'Ask Poli to build, fix, or explain…';
+    const line = inputLine(this.buffer.length ? input.text : placeholder, width, {placeholder: !this.buffer.length});
+    const rows = [workingStatus(this.activity, this.elapsed, this.frameIndex || 0, width), '', line.row, ...composerFooter({model: this.model, mode: this.mode, width, working: true, queued: this.queue.length, lines: input.lines})];
+    this.view.paint(rows, 2, 2 + input.cursorColumn, line);
   }
   setActivity(text, frame = 0, elapsed = '') {
     if (text && text !== this.activity && !this.queue.length) this.notice = '';

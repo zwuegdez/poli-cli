@@ -1,12 +1,13 @@
 import readline from 'node:readline';
+import { ComposerView, inputBand, composerMeta } from './composer-view.js';
 import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
-import { accent, messageText, cellWidth, style, truncate } from './theme.js';
+import { accent, truncate } from './theme.js';
 
 // Keep a compact activity row above the editable line. Use normal scrolling so
 // every completed output line enters native scrollback; never set scroll margins.
 export class TurnInput {
-  constructor({ controller, onSubmit, onDetails, input = process.stdin, output = process.stdout, error = process.stderr }) {
-    Object.assign(this, { controller, onSubmit, onDetails, input, output, error });
+  constructor({ controller, onSubmit, onDetails, model = 'poli', mode = 'agent', input = process.stdin, output = process.stdout, error = process.stderr }) {
+    Object.assign(this, { controller, onSubmit, onDetails, model, mode, input, output, error });
     this.queue = [];
     this.buffer = [];
     this.cursor = 0;
@@ -27,9 +28,7 @@ export class TurnInput {
     this.rawWrite = text => this.stdoutWrite.call(this.output, text);
     this.pendingOutput = '';
     this.activity = '';
-    this.footerVisible = false;
-    this.lastInput = '';
-    this.lastStatus = '';
+    this.view = new ComposerView(this.output, this.rawWrite);
     this.rawWrite('\x1b[?2004h\x1b[6 q');
     const wrap = (stream, original) => (chunk, encoding, callback) => {
       this.pendingOutput += Buffer.isBuffer(chunk) ? chunk.toString(typeof encoding === 'string' ? encoding : 'utf8') : String(chunk);
@@ -57,43 +56,19 @@ export class TurnInput {
     this.output.on('resize', this.onResize);
     this.draw();
   }
-  clear() {
-    if (this.footerVisible) this.rawWrite('\r\x1b[1A\x1b[J');
-    else this.rawWrite('\r\x1b[2K');
-    this.footerVisible = false;
-  }
+  clear() { this.view.clear(); }
   draw() {
     if (!this.active) return;
     const width = Math.max(8, this.output.columns || 80);
     const frames = ['● · ·', '· ● ·', '· · ●', '· ● ·'];
     const frame = frames[Math.floor((this.frameIndex || 0) / 2) % frames.length];
     const activity = (this.activity || 'Working').replace(/…$/, '');
-    const status = `${frame} ${activity}${this.elapsed ? ' · ' + this.elapsed : ''}`;
-    const hint = this.queue.length ? `${this.queue.length} queued · Esc stop` : 'Enter queue · Esc stop';
-    const statusRoom = width - cellWidth(hint) - 4;
-    const label = truncate(status, Math.max(1, statusRoom >= 12 ? statusRoom : width - 1));
-    const statusLine = accent(label) + (statusRoom >= 12 ? ' '.repeat(Math.max(2, width - cellWidth(label) - cellWidth(hint) - 1)) + style.dim(hint) : '');
-    const prompt = '› ';
-    const promptWidth = cellWidth(prompt);
-    const available = Math.max(1, width - promptWidth - 2);
-    const view = inputViewport(this.buffer, this.cursor, available, this.viewStart);
-    this.viewStart = view.start;
-    const value = view.text;
-    const placeholder = this.notice ? 'Message queued. Add another…' : 'Message poli…';
-    const inputLine = accent(prompt) + (this.buffer.length ? messageText(value) : style.dim(truncate(placeholder, available)));
-    const cursorColumn = promptWidth + view.cursorColumn;
-    if (!this.footerVisible) {
-      this.rawWrite(`${statusLine}\r\n${inputLine}`);
-      this.footerVisible = true;
-    } else {
-      // Animation updates only the status row: the input and its cursor do not flicker.
-      if (statusLine !== this.lastStatus) this.rawWrite(`\r\x1b[1A\x1b[2K${statusLine}\r\x1b[1B`);
-      if (inputLine !== this.lastInput) this.rawWrite(`\r\x1b[2K${inputLine}`);
-    }
-    this.lastInput = inputLine;
-    this.lastStatus = statusLine;
-    this.lastCursorColumn = cursorColumn;
-    this.rawWrite(`\r\x1b[${cursorColumn}C`);
+    const status = accent(truncate(`${frame} ${activity}${this.elapsed ? ' · ' + this.elapsed : ''}`, width - 1));
+    const input = inputViewport(this.buffer, this.cursor, width - 4, this.viewStart);
+    this.viewStart = input.start;
+    const placeholder = this.notice ? 'Message queued. Write another…' : 'Ask Poli anything…';
+    const rows = [status, inputBand(this.buffer.length ? input.text : placeholder, width, { placeholder: !this.buffer.length }), composerMeta({model: this.model, mode: this.mode, width, working: true, queued: this.queue.length, lines: input.lines})];
+    this.view.paint(rows, 1, 2 + input.cursorColumn);
   }
   setActivity(text, frame = 0, elapsed = '') {
     if (text && text !== this.activity && !this.queue.length) this.notice = '';
@@ -104,14 +79,7 @@ export class TurnInput {
   }
   onResize() {
     if (!this.active) return;
-    // After reflow, recover the first footer row from its previous cell lengths.
-    const width = Math.max(8, this.output.columns || 80);
-    if (this.footerVisible) {
-      const statusRows = Math.max(1, Math.ceil(cellWidth(this.lastStatus) / width));
-      const cursorRows = Math.floor((this.lastCursorColumn || 0) / width);
-      this.rawWrite(`\r\x1b[${statusRows + cursorRows}A\x1b[J`);
-      this.footerVisible = false;
-    }
+    this.view.resize();
     this.draw();
   }
   insert(text) {

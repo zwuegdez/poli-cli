@@ -4,7 +4,35 @@ import { PassThrough } from 'node:stream';
 import headless from '@xterm/headless';
 import { TurnInput } from '../src/ui/turn-input.js';
 import { Spinner } from '../src/ui/spinner.js';
+import { ComposerView, composerMeta, inputBand } from '../src/ui/composer-view.js';
 const { Terminal } = headless;
+
+test('idle input, model footer, and slash menu survive mobile reflow without stale rows', async () => {
+  const f = fixture(24, 110);
+  const view = new ComposerView(f.output, text => f.output.write(text));
+  const paint = (menu = false) => {
+    const rows = [inputBand('idle draft', f.output.columns), composerMeta({model: 'cbai/hy4-preview', width: f.output.columns})];
+    if (menu) rows.push('  › /models', '    /mode');
+    view.paint(rows, 0, 12);
+  };
+  try {
+    f.output.write('IDLE_TRANSCRIPT_KEEP\n'); paint(); await f.flush();
+    for (const cols of [40, 110, 30, 80]) {
+      f.terminal.resize(cols, 24); f.output.columns = cols; view.resize(); paint(); await f.flush();
+      assert.equal(f.lines().filter(line => line.includes('idle draft')).length, 1, f.lines().join('\n'));
+      assert.equal(f.lines().filter(line => line.includes('cbai/hy4')).length, 1, f.lines().join('\n'));
+      assert.ok(f.lines().includes('IDLE_TRANSCRIPT_KEEP'));
+    }
+    paint(true); await f.flush();
+    assert.ok(f.lines().some(line => line.includes('/models')));
+    paint(); await f.flush();
+    assert.ok(!f.lines().some(line => line.includes('/models')));
+    view.clear(); f.output.write('NEXT_MESSAGE_KEEP\n'); await f.flush();
+    assert.ok(f.lines().includes('IDLE_TRANSCRIPT_KEEP'));
+    assert.ok(f.lines().includes('NEXT_MESSAGE_KEEP'));
+    assert.ok(!f.lines().some(line => line.includes('idle draft')));
+  } finally { f.terminal.dispose(); }
+});
 
 function fixture(rows = 24, cols = 80) {
   const terminal = new Terminal({ rows, cols, scrollback: 1000, convertEol: true, allowProposedApi: true });
@@ -78,11 +106,11 @@ test('resizing does not leave an old working footer in the conversation', async 
     f.output.write('HEADER_KEEP\n');
     f.composer.start();f.output.write('BEFORE_RESIZE_KEEP\n');await f.flush();
     f.terminal.resize(80, 30);f.output.rows=30;f.composer.onResize();await f.flush();
-    assert.equal(f.lines().filter(line=>line.includes('Message poli')).length,1,f.lines().join('\n'));
+    assert.equal(f.lines().filter(line=>line.includes('Ask Poli anything')).length,1,f.lines().join('\n'));
     f.output.write('AFTER_RESIZE_KEEP\n');f.composer.close();f.output.write('NEXT_PROMPT_KEEP\n');await f.flush();
     const lines=f.lines();
     for(const marker of ['HEADER_KEEP','BEFORE_RESIZE_KEEP','AFTER_RESIZE_KEEP','NEXT_PROMPT_KEEP'])assert.ok(lines.includes(marker),lines.join('\n'));
-    assert.equal(lines.filter(line=>line.includes('Message poli')).length,0,lines.join('\n'));
+    assert.equal(lines.filter(line=>line.includes('Ask Poli anything')).length,0,lines.join('\n'));
   } finally { f.composer.close();f.terminal.dispose(); }
 });
 
@@ -97,7 +125,7 @@ test('shrinking terminal height preserves the answer, draft, and restored cursor
     const lines=f.lines();
     for(const marker of ['HEADER_KEEP','BEFORE_SHRINK_KEEP','AFTER_SHRINK_KEEP','NEXT_PROMPT_KEEP'])assert.ok(lines.includes(marker),lines.join('\n'));
     assert.equal(f.composer.draft(),'my draft');
-    assert.equal(lines.filter(line=>line.includes('Message poli')).length,0,lines.join('\n'));
+    assert.equal(lines.filter(line=>line.includes('Ask Poli anything')).length,0,lines.join('\n'));
   } finally { f.composer.close();f.terminal.dispose(); }
 });
 
@@ -188,13 +216,13 @@ test('activity animates above a full-width draft without repainting the input', 
     const inputRow = lines.findIndex(line => line.includes(draft));
     assert.ok(inputRow > 0);
     assert.match(lines[inputRow - 1], /· ● · Replying · 1.1s/);
-    assert.match(lines[inputRow - 1], /Enter queue · Esc stop/);
+    assert.match(lines[inputRow + 1], /Enter queue · Esc stop/);
     assert.equal(f.terminal.buffer.active.cursorX, draft.length + 2);
     assert.ok(!printed.includes(draft), 'animation must not rewrite the draft');
     f.composer.onKey('\r', {name: 'return'});
     await f.flush();
     assert.ok(f.lines().some(line => line.includes('1 queued')));
-    assert.ok(f.lines().some(line => line.includes('Message queued. Add another')));
+    assert.ok(f.lines().some(line => line.includes('Message queued. Write another')));
     assert.deepEqual(f.composer.drain(), [draft]);
   } finally { f.composer.close(); f.terminal.dispose(); }
 });

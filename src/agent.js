@@ -31,7 +31,7 @@ export class PoliAgent {
     let actions = 0, formatRepaired = false;
     const spinner = new Spinner('', process.stdout);
     this.lastTurnFailed = false;
-    const turnInput = this.createTurnInput({ controller, onDetails: () => process.stdout.write('\n' + toolDetails(this.session.messages) + '\n\n'), onSubmit: message => this.promptManager?.saveHistory(message) });
+    const turnInput = this.createTurnInput({ model: this.config.model, mode: this.config.mode, controller, onDetails: () => process.stdout.write('\n' + toolDetails(this.session.messages) + '\n\n'), onSubmit: message => this.promptManager?.saveHistory(message) });
     turnInput.start();
     const watch = () => turnInput.active ? () => {} : watchCancellation(controller);
     const appendQueued = () => {

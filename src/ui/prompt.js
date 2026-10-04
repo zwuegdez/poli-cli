@@ -1,9 +1,10 @@
 // Interactive Prompt and Readline Manager with Codex-style "/" command menu
 import readline from 'node:readline';
+import { ComposerView, inputBand, composerMeta } from './composer-view.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
-import { colors, style, accent, messageText, cellWidth, truncate, terminalWidth } from './theme.js';
+import { colors, style, accent, cellWidth, truncate, terminalWidth } from './theme.js';
 
 export const COMMAND_LIST = [
   { cmd: '/help', args: '', desc: 'Show all available slash commands and shortcuts', category: 'Commands' },
@@ -93,66 +94,39 @@ export class PromptManager {
       readline.emitKeypressEvents(stdin);
       stdin.setRawMode(true);
       stdin.resume();
-      let buffer = splitInput(this.draft || ''), cursor = buffer.length, selected = 0, menuLines = 0, dismissed = false;
+      let buffer = splitInput(this.draft || ''), cursor = buffer.length, selected = 0, dismissed = false;
       this.draft = '';
       let draft = [], pasting = false, paste = '', viewStart = 0;
       this.historyIndex = -1;
       const text = () => buffer.join('');
       const matches = () => dismissed ? [] : matchCommands(text());
-      const clearMenu = () => {
-        if (!menuLines) return;
-        readline.cursorTo(stdout, 0);
-        for (let i = 0; i < menuLines; i++) stdout.write('\x1b[1B\x1b[2K');
-        stdout.write(`\x1b[${menuLines}A`);
-        menuLines = 0;
-      };
+      const view = new ComposerView(stdout, value => stdout.write(value));
       const render = () => {
-        clearMenu();
-        readline.cursorTo(stdout, 0);
-        readline.clearLine(stdout, 0);
         const width = Math.max(8, stdout.columns || 80);
-        const prompt = '› ';
-        const promptWidth = cellWidth(prompt);
-        const available = width - promptWidth - 2;
-        const view = inputViewport(buffer, cursor, available, viewStart);
-        viewStart = view.start;
-        const visible = view.text;
+        const input = inputViewport(buffer, cursor, width - 4, viewStart);
+        viewStart = input.start;
         const items = matches();
         selected = items.length ? (selected + items.length) % items.length : 0;
-        const placeholder = mode === 'chat' ? 'Message poli… · / commands' : 'Describe a task or ask… · / commands';
-        stdout.write(accent(prompt) + (buffer.length ? messageText(visible) : style.dim(truncate(placeholder, available))));
-        const cursorColumn = promptWidth + view.cursorColumn;
-        if (!items.length) {
-          const hint = view.lines > 1 ? `${view.lines} lines · Enter send` : 'Enter send · Ctrl+J newline';
-          const bodyWidth = cellWidth(buffer.length ? visible : truncate(placeholder, available));
-          if (bodyWidth + cellWidth(hint) + 8 < width) {
-            readline.cursorTo(stdout, width - cellWidth(hint) - 2);
-            stdout.write(style.dim(hint));
-          }
-        }
+        const rows = [inputBand(buffer.length ? input.text : 'Ask Poli anything…', width, {placeholder: !buffer.length}), composerMeta({model, mode, width, lines: input.lines})];
         if (items.length) {
           const count = Math.min(items.length, Math.max(1, Math.min(6, (stdout.rows || 24) - 8)));
           const offset = Math.max(0, Math.min(selected - count + 1, items.length - count));
-          const rows = items.slice(offset, offset + count).map((item, i) => {
-            const active = offset + i === selected;
-            const label = item.cmd + (item.args ? ' ' + item.args : '');
-            const row = `${active ? '>' : ' '} ${label}`;
-            const details = terminalWidth() >= 65 ? ' '.repeat(Math.max(1, 26 - cellWidth(row))) + item.desc : '';
-            const itemLine = truncate(row + details, Math.max(1, terminalWidth() - 4));
-            return active ? accent(itemLine) : style.dim(itemLine);
-          });
-          rows.push(style.dim(`↑↓ select · Tab fill · Esc close · ${selected + 1}/${items.length}`));
-          const menu = rows.map(row => '   ' + row).join('\n');
-          stdout.write('\n' + menu);
-          menuLines = menu.split('\n').length;
-          stdout.write(`\x1b[${menuLines}A`);
+          for (let i = offset; i < offset + count; i++) {
+            const item = items[i];
+            const label = `${i === selected ? '›' : ' '} ${item.cmd}${item.args ? ' ' + item.args : ''}`;
+            const description = width >= 65 ? ' '.repeat(Math.max(1, 26 - cellWidth(label))) + item.desc : '';
+            const row = truncate('  ' + label + description, width - 1);
+            rows.push(i === selected ? accent(row) : style.dim(row));
+          }
+          rows.push(style.dim(truncate(`  ↑↓ select · Tab fill · Esc close · ${selected + 1}/${items.length}`, width - 1)));
         }
-        readline.cursorTo(stdout, cursorColumn);
+        view.paint(rows, 0, 2 + input.cursorColumn);
       };
+      const onResize = () => { view.resize(); render(); };
       const finish = (value) => {
-        clearMenu();
+        view.clear();
         stdin.removeListener('keypress', onKey);
-        stdout.removeListener('resize', render);
+        stdout.removeListener('resize', onResize);
         stdin.removeListener('end', onEnd);
         stdout.write('\x1b[?2004l\x1b[0 q');
         stdin.setRawMode(previousRaw || false);
@@ -212,7 +186,7 @@ export class PromptManager {
       stdout.write('\x1b[?2004h\x1b[6 q');
       stdin.on('keypress', onKey);
       stdin.once('end', onEnd);
-      stdout.on('resize', render);
+      stdout.on('resize', onResize);
       render();
     });
   }

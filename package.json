@@ -1,6 +1,6 @@
 {
   "name": "poli-cli",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Next-generation agentic AI coding CLI powered by poli-proxy",
   "main": "src/index.js",
   "type": "module",

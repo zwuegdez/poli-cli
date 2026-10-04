@@ -109,7 +109,7 @@ export class PromptManager {
         const items = matches();
         selected = items.length ? (selected + items.length) % items.length : 0;
         const line = inputLine(buffer.length ? input.text : 'Ask Poli to build, fix, or explain…', width, {placeholder: !buffer.length});
-        const rows = ['', line.row, ...composerFooter({model, mode, width, lines: input.lines})];
+        const rows = ['', ...composerFooter({model, mode, width, lines: input.lines})];
         if (items.length) {
           const count = Math.min(items.length, Math.max(1, Math.min(6, (stdout.rows || 24) - 8)));
           const offset = Math.max(0, Math.min(selected - count + 1, items.length - count));
@@ -122,7 +122,8 @@ export class PromptManager {
           }
           rows.push(style.dim(truncate(`  ↑↓ select · Tab fill · Esc close · ${selected + 1}/${items.length}`, width - 1)));
         }
-        view.paint(rows, 1, 2 + input.cursorColumn, line);
+        rows.push(line.row);
+        view.paint(rows, rows.length - 1, 2 + input.cursorColumn, line);
       };
       const onResize = () => view.queueResize(render);
       const finish = (value) => {
@@ -148,6 +149,7 @@ export class PromptManager {
       };
       const onEnd = () => finish('/exit');
       const onKey = (str, key = {}) => {
+        if (view.handleCursorReport(key.sequence)) return;
         if (key.sequence === '\x1b[200~') { pasting = true; paste = ''; return; }
         if (key.sequence === '\x1b[201~') { pasting = false; insert(paste); render(); return; }
         if (pasting) { paste += str || key.sequence || ''; return; }

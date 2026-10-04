@@ -20,8 +20,8 @@ export function workingStatus(activity, elapsed, frame, width) {
   return dot + ' ' + style.dim(truncate(`${label} (${seconds}s · Esc to stop)`, Math.max(1, width - 3)));
 }
 
-// All positions are relative to the editable row. No alternate screen, scroll
-// region, or absolute screen coordinate: the transcript stays in scrollback.
+// Normal paints stay relative to the editable row. After resizing, a cursor
+// report repairs client clamping without clearing the transcript or scrollback.
 export class ComposerView {
   constructor(output, write) { this.output = output; this.write = write; this.visible = false; }
   get renderable() {
@@ -31,24 +31,46 @@ export class ComposerView {
   }
   queueResize(redraw) {
     this.resizing = true;
+    const generation = this.resizeGeneration = (this.resizeGeneration || 0) + 1;
     clearTimeout(this.resizeTimer);
+    clearTimeout(this.cursorTimer);
+    this.cursorReply = null;
     if (!this.resizePending) this.resizePending = new Promise(resolve => { this.resizeResolved = resolve; });
     this.resizeTimer = setTimeout(() => {
       this.resizeTimer = null;
-      this.resizing = false;
-      this.resize();
-      try { redraw(); }
-      finally {
-        const resolve = this.resizeResolved;
-        this.resizePending = null;
-        this.resizeResolved = null;
-        resolve?.();
-      }
+      const finish = position => {
+        if (generation !== this.resizeGeneration) return;
+        this.cursorReply = null;
+        clearTimeout(this.cursorTimer);
+        this.resizing = false;
+        this.resize(position);
+        try { redraw(); }
+        finally {
+          const resolve = this.resizeResolved;
+          this.resizePending = null;
+          this.resizeResolved = null;
+          resolve?.();
+        }
+      };
+      // Synchronize with the client after its resize burst before repainting.
+      // The editable row stays last, so no footer can displace its cursor.
+      this.cursorReply = finish;
+      this.cursorTimer = setTimeout(() => finish(null), 150);
+      this.write('\x1b[6n');
     }, 300);
+  }
+  handleCursorReport(sequence = '') {
+    const match = /^\x1b\[(\d+);(\d+)R$/.exec(sequence);
+    if (!match) return false;
+    this.cursorReply?.({row: Number(match[1]), column: Number(match[2])});
+    return true;
   }
   settled() { return this.resizePending || Promise.resolve(); }
   dispose() {
+    this.resizeGeneration = (this.resizeGeneration || 0) + 1;
     clearTimeout(this.resizeTimer);
+    clearTimeout(this.cursorTimer);
+    this.cursorReply = null;
     this.resizeTimer = null;
     this.resizing = false;
     this.resizeResolved?.();
@@ -83,14 +105,18 @@ export class ComposerView {
     this.rows = rows; this.inputRow = inputRow; this.cursorColumn = cursorColumn;
     this.write(`\r\x1b[${cursorColumn}C`);
   }
-  resize() {
+  resize(position) {
     if (!this.renderable || !this.visible) return;
     const width = Math.max(8, this.output.columns || 80);
     // Shell terminals leave the editable cursor row for the application to
     // redraw; only the surrounding rows contribute to automatic reflow.
     const extra = this.rows.reduce((sum, row, index) => sum + (index === this.inputRow ? 0 : Math.max(0, Math.ceil(cellWidth(row) / width) - 1)), 0);
     const up = this.inputRow + extra;
-    this.write('\r' + (up ? `\x1b[${up}A` : '') + '\x1b[J');
+    if (position) {
+      this.write(`\x1b[${Math.max(1, position.row - up)};1H\x1b[J`);
+    } else {
+      this.write('\r' + (up ? `\x1b[${up}A` : '') + '\x1b[J');
+    }
     this.visible = false;
   }
 }

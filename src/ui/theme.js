@@ -261,7 +261,7 @@ export function box(title, content, options = {}) {
   return [top, ...rows, `${borderColor}╰${'─'.repeat(width - 2)}╯${colors.reset}`].join('\n');
 }
 
-export function banner({ version = '1.3.2', model = 'gpt-6.1-sol', cwd = process.cwd(), branch = '', autoApprove = false, mode = 'agent' } = {}) {
+export function banner({ version = '1.3.3', model = 'gpt-6.1-sol', cwd = process.cwd(), branch = '', autoApprove = false, mode = 'agent' } = {}) {
   const width = terminalWidth();
   const rows = [];
   const brand = style.poliBrand();

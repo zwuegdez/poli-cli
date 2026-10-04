@@ -205,11 +205,11 @@ stopped results for unfinished calls; resuming never silently executes those cal
 
 ### Input and status
 The composer follows a Codex-style layout: a separate animated activity line during
-work, a blank line, a plain `›` input, and compact model/mode and shortcut rows below.
+work, compact model/mode and shortcut rows, and a plain `›` input on the last row.
 There are no frames or background bars. Green accents highlight the prompt and model;
 message text uses the terminal's foreground. The activity line shows elapsed time and
-Esc to stop. Enter queues follow-ups during work, with the count shown below the input.
-Ctrl+J inserts a newline; slash suggestions open beneath the composer. Animation
+Esc to stop. Enter queues follow-ups during work, with the count shown above the input.
+Ctrl+J inserts a newline; slash suggestions open above the input. Animation
 updates the activity row without rewriting the draft. The layout uses native terminal
 scrollback and adapts to mobile keyboard size changes.
 Without an interactive terminal, changes requiring approval are declined unless `-y`

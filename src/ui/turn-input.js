@@ -66,8 +66,8 @@ export class TurnInput {
     this.viewStart = input.start;
     const placeholder = 'Ask Poli to build, fix, or explain…';
     const line = inputLine(this.buffer.length ? input.text : placeholder, width, {placeholder: !this.buffer.length});
-    const rows = [workingStatus(this.activity, this.elapsed, this.frameIndex || 0, width), '', line.row, ...composerFooter({model: this.model, mode: this.mode, width, working: true, queued: this.queue.length, lines: input.lines})];
-    this.view.paint(rows, 2, 2 + input.cursorColumn, line);
+    const rows = [workingStatus(this.activity, this.elapsed, this.frameIndex || 0, width), '', ...composerFooter({model: this.model, mode: this.mode, width, working: true, queued: this.queue.length, lines: input.lines}), line.row];
+    this.view.paint(rows, rows.length - 1, 2 + input.cursorColumn, line);
   }
   setActivity(text, frame = 0, elapsed = '') {
     if (text && text !== this.activity && !this.queue.length) this.notice = '';
@@ -91,6 +91,7 @@ export class TurnInput {
     this.notice = '';
   }
   onKey(text, key = {}) {
+    if (this.view?.handleCursorReport(key.sequence)) return;
     if (key.sequence === '\x1b[200~') { this.pasting = true; this.paste = ''; return; }
     if (key.sequence === '\x1b[201~') { this.pasting = false; this.insert(this.paste); this.draw(); return; }
     if (this.pasting) { this.paste += text || key.sequence || ''; return; }

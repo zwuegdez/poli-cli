@@ -322,7 +322,7 @@ test('partial output and animated tool status never overwrite messages or drafts
   } finally { spinner.stop(); f.composer.close(); f.terminal.dispose(); }
 });
 
-test('Codex-style activity and model footer surround the draft without repainting it', async () => {
+test('activity and model context stay above the draft without repainting it', async () => {
   const f = fixture(12, 80);
   let printed = '';
   f.output.on('data', chunk => { printed += String(chunk); });
@@ -341,10 +341,10 @@ test('Codex-style activity and model footer surround the draft without repaintin
     const inputRow = lines.findIndex(line => line.includes(draft));
     assert.ok(inputRow > 0);
     assert.ok(lines[inputRow].startsWith('› '));
-    assert.match(lines[inputRow - 2], /• Replying \(1s · Esc to stop\)/);
-    assert.equal(lines[inputRow - 1], '');
-    assert.match(lines[inputRow + 1], /poli · agent/);
-    assert.match(lines[inputRow + 2], /Enter queue · Esc stop/);
+    assert.match(lines[inputRow - 4], /• Replying \(1s · Esc to stop\)/);
+    assert.equal(lines[inputRow - 3], '');
+    assert.match(lines[inputRow - 2], /poli · agent/);
+    assert.match(lines[inputRow - 1], /Enter queue · Esc stop/);
     assert.equal(f.terminal.buffer.active.cursorX, draft.length + 2);
     assert.ok(!printed.includes(draft), 'animation must not rewrite the draft');
     f.composer.onKey('\r', {name: 'return'});
@@ -392,4 +392,51 @@ test('opening and closing a mobile keyboard keeps history and one editable draft
     assert.ok(f.lines().includes('NEW_REPLY_KEEP'));
     assert.ok(!f.lines().some(line => line.includes('mobile draft')));
   } finally { f.composer.close(); f.terminal.dispose(); }
+});
+
+for (const working of [false, true]) {
+  test(`cursor clamped to bottom on reconnect preserves one ${working ? 'working' : 'idle'} input`, async () => {
+    const f = fixture(24, 120);
+    const view = working ? null : new ComposerView(f.output, text => f.output.write(text));
+    const activeView = () => view || f.composer.view;
+    const response = f.terminal.onData(data => activeView()?.handleCursorReport(data));
+    const paint = () => view.paint(['', ...composerFooter({model: 'demo', width: 120}), inputLine('RECONNECT_DRAFT', 120).row], 3, 2);
+    try {
+      for (let i = 0; i < 30; i++) f.output.write(`HISTORY_${i}\n`);
+      if (working) { f.composer.start(); f.composer.onKey('RECONNECT_DRAFT', {}); }
+      else paint();
+      await f.flush();
+      for (const height of [22, 20, 18]) {
+        f.terminal.resize(120, height); f.output.rows = height;
+        // The measured mobile client retains the cursor on the last row after
+        // shrinking. Keeping the input last avoids any footer/cursor mismatch.
+        f.output.write(`\x1b[${height};3H`);
+        await f.flush();
+        if (working) f.composer.onResize(); else view.queueResize(paint);
+        await activeView().settled(); await f.flush();
+        assert.equal(f.lines().filter(line => line.includes('RECONNECT_DRAFT')).length, 1, f.lines().join('\n'));
+        for (let i = 0; i < 30; i++) assert.ok(f.lines().includes(`HISTORY_${i}`), `missing ${i}: ` + f.lines().join("\n"));
+      }
+    } finally { response.dispose(); if (working) f.composer.suspend(); view?.dispose(); f.terminal.dispose(); }
+  });
+}
+
+test('a new resize cancels an outstanding cursor query and late reports never become input', async () => {
+  const f = fixture();
+  let queries = 0;
+  let firstQuery;
+  const queried = new Promise(resolve => { firstQuery = resolve; });
+  f.output.on('data', data => { if (String(data).includes('\x1b[6n')) { queries++; firstQuery(); } });
+  try {
+    f.composer.start(); f.composer.onKey('keep draft', {});
+    f.composer.onResize(); await queried;
+    f.composer.onResize();
+    f.composer.onKey(undefined, {sequence: '\x1b[24;3R'});
+    assert.equal(f.composer.view.resizing, true);
+    await f.flush();
+    assert.equal(queries, 2);
+    assert.equal(f.composer.buffer.join(''), 'keep draft');
+    f.composer.onKey(undefined, {sequence: '\x1b[24;3R'});
+    assert.equal(f.composer.buffer.join(''), 'keep draft');
+  } finally { f.composer.suspend(); f.terminal.dispose(); }
 });

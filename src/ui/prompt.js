@@ -102,6 +102,7 @@ export class PromptManager {
       const matches = () => dismissed ? [] : matchCommands(text());
       const view = new ComposerView(stdout, value => stdout.write(value));
       const render = () => {
+        if (!view.renderable) return;
         const width = Math.max(8, stdout.columns || 80);
         const input = inputViewport(buffer, cursor, width - 4, viewStart);
         viewStart = input.start;

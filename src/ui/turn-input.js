@@ -31,13 +31,7 @@ export class TurnInput {
     this.rawWrite('\x1b[?2004h\x1b[6 q');
     const wrap = (stream, original) => (chunk, encoding, callback) => {
       this.pendingOutput += Buffer.isBuffer(chunk) ? chunk.toString(typeof encoding === 'string' ? encoding : 'utf8') : String(chunk);
-      const end = this.pendingOutput.lastIndexOf('\n');
-      if (end >= 0) {
-        this.clear();
-        original.call(stream, this.pendingOutput.slice(0, end + 1));
-        this.pendingOutput = this.pendingOutput.slice(end + 1);
-        this.draw();
-      }
+      if (this.flushOutput(stream, original)) this.draw();
       const done = typeof encoding === 'function' ? encoding : callback;
       if (done) queueMicrotask(done);
       return true;
@@ -55,9 +49,18 @@ export class TurnInput {
     this.output.on('resize', this.onResize);
     this.draw();
   }
+  flushOutput(stream = this.output, write = this.stdoutWrite) {
+    if (!this.view.renderable) return false;
+    const end = this.pendingOutput.lastIndexOf('\n');
+    if (end < 0) return false;
+    this.clear();
+    write.call(stream, this.pendingOutput.slice(0, end + 1));
+    this.pendingOutput = this.pendingOutput.slice(end + 1);
+    return true;
+  }
   clear() { this.view.clear(); }
   draw() {
-    if (!this.active) return;
+    if (!this.active || !this.view.renderable) return;
     const width = Math.max(8, this.output.columns || 80);
     const input = inputViewport(this.buffer, this.cursor, width - 4, this.viewStart);
     this.viewStart = input.start;
@@ -74,8 +77,9 @@ export class TurnInput {
     this.draw();
   }
   onResize() {
-    if (!this.active) return;
+    if (!this.active || !this.view.renderable) return;
     this.view.resize();
+    this.flushOutput();
     this.draw();
   }
   insert(text) {

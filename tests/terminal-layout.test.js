@@ -53,6 +53,46 @@ test('idle input and slash menu survive mobile reflow without stale rows', async
   } finally { f.terminal.dispose(); }
 });
 
+test('one-row and zero-size app transitions do not scroll idle prompts into history', async () => {
+  const f = fixture(52, 110);
+  const view = new ComposerView(f.output, text => f.output.write(text));
+  const paint = () => view.paint(['', inputLine('Ask Poli to build, fix, or explain…', f.output.columns, {placeholder: true}).row, ...composerFooter({model: 'demo', width: f.output.columns})], 1, 2);
+  try {
+    f.output.write('APP_SWITCH_HISTORY_KEEP\n'); paint(); await f.flush();
+    for (const [cols, rows] of [[110, 2], [0, 0], [110, 52], [110, 1], [110, 52], [1, 2], [110, 52]]) {
+      if (cols && rows) f.terminal.resize(cols, rows);
+      f.output.columns = cols; f.output.rows = rows;
+      view.resize(); paint(); await f.flush();
+    }
+    const lines = f.lines();
+    assert.ok(lines.includes('APP_SWITCH_HISTORY_KEEP'), lines.join('\n'));
+    assert.equal(lines.filter(line => line.includes('Ask Poli to build')).length, 1, lines.join('\n'));
+    assert.equal(lines.filter(line => line.includes('demo · agent')).length, 1, lines.join('\n'));
+  } finally { f.terminal.dispose(); }
+});
+
+test('streaming during a hidden tiny window buffers output and restores one draft', async () => {
+  const f = fixture(52, 110);
+  try {
+    f.output.write('WORK_SWITCH_HISTORY_KEEP\n'); f.composer.start();
+    f.composer.onKey('keep this draft', {}); await f.flush();
+    for (let i = 0; i < 3; i++) {
+      f.terminal.resize(110, 2); f.output.rows = 2;
+      f.composer.onResize();
+      f.composer.setActivity('Replying…', i, `${i}s`);
+      f.output.write(`HIDDEN_REPLY_${i}\n`);
+      assert.ok(f.composer.pendingOutput.includes(`HIDDEN_REPLY_${i}`));
+      f.terminal.resize(110, 52); f.output.rows = 52;
+      f.composer.onResize(); await f.flush();
+    }
+    const lines = f.lines();
+    assert.ok(lines.includes('WORK_SWITCH_HISTORY_KEEP'), lines.join('\n'));
+    assert.equal(lines.filter(line => line.includes('keep this draft')).length, 1, lines.join('\n'));
+    for (let i = 0; i < 3; i++) assert.equal(lines.filter(line => line === `HIDDEN_REPLY_${i}`).length, 1, lines.join('\n'));
+    assert.equal(f.composer.draft(), 'keep this draft');
+  } finally { f.composer.close(); f.terminal.dispose(); }
+});
+
 function fixture(rows = 24, cols = 80, terminalOptions = {}) {
   const terminal = new Terminal({ rows, cols, scrollback: 1000, convertEol: true, allowProposedApi: true, ...terminalOptions });
   const input = new PassThrough(); input.isTTY = true; input.isRaw = false;

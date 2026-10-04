@@ -1,8 +1,8 @@
 import readline from 'node:readline';
 import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
-import { accent, messageText, cellWidth, style, truncate, symbols } from './theme.js';
+import { accent, messageText, cellWidth, style, truncate } from './theme.js';
 
-// Keep one editable line after the transcript. Use normal terminal scrolling so
+// Keep a compact activity row above the editable line. Use normal scrolling so
 // every completed output line enters native scrollback; never set scroll margins.
 export class TurnInput {
   constructor({ controller, onSubmit, onDetails, input = process.stdin, output = process.stdout, error = process.stderr }) {
@@ -27,6 +27,9 @@ export class TurnInput {
     this.rawWrite = text => this.stdoutWrite.call(this.output, text);
     this.pendingOutput = '';
     this.activity = '';
+    this.footerVisible = false;
+    this.lastInput = '';
+    this.lastStatus = '';
     this.rawWrite('\x1b[?2004h\x1b[6 q');
     const wrap = (stream, original) => (chunk, encoding, callback) => {
       this.pendingOutput += Buffer.isBuffer(chunk) ? chunk.toString(typeof encoding === 'string' ? encoding : 'utf8') : String(chunk);
@@ -55,28 +58,42 @@ export class TurnInput {
     this.draw();
   }
   clear() {
-    this.rawWrite('\r\x1b[2K');
+    if (this.footerVisible) this.rawWrite('\r\x1b[1A\x1b[J');
+    else this.rawWrite('\r\x1b[2K');
+    this.footerVisible = false;
   }
   draw() {
     if (!this.active) return;
     const width = Math.max(8, this.output.columns || 80);
-    const frame = symbols.spinner[this.frameIndex || 0];
-    const longDraft = cellWidth(this.buffer.join('')) > width / 2;
-    const status = this.activity ? (longDraft ? frame : `${frame} ${this.activity}${this.elapsed ? ' · ' + this.elapsed : ''}`) : (longDraft ? '' : 'Enter send · Esc stop');
-    const statusWidth = this.notice ? 0 : Math.min(cellWidth(status), Math.max(0, Math.min(32, Math.floor(width / 2) - 2)));
+    const frames = ['● · ·', '· ● ·', '· · ●', '· ● ·'];
+    const frame = frames[Math.floor((this.frameIndex || 0) / 2) % frames.length];
+    const activity = (this.activity || 'Working').replace(/…$/, '');
+    const status = `${frame} ${activity}${this.elapsed ? ' · ' + this.elapsed : ''}`;
+    const hint = this.queue.length ? `${this.queue.length} queued · Esc stop` : 'Enter queue · Esc stop';
+    const statusRoom = width - cellWidth(hint) - 4;
+    const label = truncate(status, Math.max(1, statusRoom >= 12 ? statusRoom : width - 1));
+    const statusLine = accent(label) + (statusRoom >= 12 ? ' '.repeat(Math.max(2, width - cellWidth(label) - cellWidth(hint) - 1)) + style.dim(hint) : '');
     const prompt = '› ';
     const promptWidth = cellWidth(prompt);
-    const available = Math.max(1, width - promptWidth - 2 - (statusWidth ? statusWidth + 2 : 0));
+    const available = Math.max(1, width - promptWidth - 2);
     const view = inputViewport(this.buffer, this.cursor, available, this.viewStart);
     this.viewStart = view.start;
     const value = view.text;
-    this.clear();
-    const placeholder = this.notice || 'Type a follow-up…';
-    this.rawWrite(`${accent(prompt)}${this.buffer.length ? messageText(value) : style.dim(truncate(placeholder, available))}`);
-    if (statusWidth) {
-      this.rawWrite(`\r\x1b[${width - statusWidth - 2}C${this.activity ? accent(truncate(status, statusWidth)) : style.dim(truncate(status, statusWidth))}`);
+    const placeholder = this.notice ? 'Message queued. Add another…' : 'Message poli…';
+    const inputLine = accent(prompt) + (this.buffer.length ? messageText(value) : style.dim(truncate(placeholder, available)));
+    const cursorColumn = promptWidth + view.cursorColumn;
+    if (!this.footerVisible) {
+      this.rawWrite(`${statusLine}\r\n${inputLine}`);
+      this.footerVisible = true;
+    } else {
+      // Animation updates only the status row: the input and its cursor do not flicker.
+      if (statusLine !== this.lastStatus) this.rawWrite(`\r\x1b[1A\x1b[2K${statusLine}\r\x1b[1B`);
+      if (inputLine !== this.lastInput) this.rawWrite(`\r\x1b[2K${inputLine}`);
     }
-    this.rawWrite(`\r\x1b[${promptWidth + view.cursorColumn}C`);
+    this.lastInput = inputLine;
+    this.lastStatus = statusLine;
+    this.lastCursorColumn = cursorColumn;
+    this.rawWrite(`\r\x1b[${cursorColumn}C`);
   }
   setActivity(text, frame = 0, elapsed = '') {
     if (text && text !== this.activity && !this.queue.length) this.notice = '';
@@ -87,9 +104,14 @@ export class TurnInput {
   }
   onResize() {
     if (!this.active) return;
-    // The terminal can reflow the old editable line onto extra rows. Only
-    // clear from that final line down; the transcript above stays untouched.
-    this.rawWrite('\r\x1b[J');
+    // After reflow, recover the first footer row from its previous cell lengths.
+    const width = Math.max(8, this.output.columns || 80);
+    if (this.footerVisible) {
+      const statusRows = Math.max(1, Math.ceil(cellWidth(this.lastStatus) / width));
+      const cursorRows = Math.floor((this.lastCursorColumn || 0) / width);
+      this.rawWrite(`\r\x1b[${statusRows + cursorRows}A\x1b[J`);
+      this.footerVisible = false;
+    }
     this.draw();
   }
   insert(text) {
@@ -110,7 +132,7 @@ export class TurnInput {
       if (message.trim()) {
         this.queue.push(message);
         this.onSubmit?.(message);
-        this.notice = `Queued (${this.queue.length}): ${message}`;
+        this.notice = 'Queued';
         this.buffer = [];
         this.cursor = 0;
       }
@@ -128,7 +150,7 @@ export class TurnInput {
   }
   drain() {
     const messages = this.queue.splice(0);
-    if (messages.length) { this.notice = 'Processing your queued message…'; this.draw(); }
+    if (messages.length) { this.notice = ''; this.draw(); }
     return messages;
   }
   suspend() {

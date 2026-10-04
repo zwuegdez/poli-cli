@@ -204,8 +204,11 @@ sessions from other workspaces are excluded. An interrupted tool batch gets expl
 stopped results for unfinished calls; resuming never silently executes those calls.
 
 ### Input and status
-Chat mode uses conversational welcome and input hints. While typing a long follow-up,
-the activity indicator contracts to a dot to leave more room for the message.
+During work, a compact activity row sits above the full-width `Message poli…` input.
+Three green dots animate beside the current action and elapsed time. Animation updates
+only that status row, leaving the draft and cursor steady. Enter queues a message;
+the status row shows the queue count and Esc stops the current response. The two rows
+use normal terminal scrollback and adapt when a mobile keyboard changes the window size.
 Without an interactive terminal, changes requiring approval are declined unless `-y`
 is supplied. Requests time out after 120 seconds by default; configure
 `requestTimeoutMs` if your model needs more time. Shell commands default to 120 seconds;

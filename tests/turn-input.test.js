@@ -23,7 +23,7 @@ test('typing stays available between output writes, and Enter submits a queued m
     f.composer.onKey('\r', { name: 'return' });
     assert.deepEqual(f.composer.drain(), ['hello world']);
     assert.match(f.printed(), /Assistant progress/);
-    assert.match(f.printed(), /Queued \(1\): hello world/);
+    assert.match(f.printed(), /1 queued/);
     assert.equal(f.composer.draft(), '');
   } finally { f.composer.close(); }
   assert.equal(f.output.write, f.originalWrite);

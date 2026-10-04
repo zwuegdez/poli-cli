@@ -78,11 +78,11 @@ test('resizing does not leave an old working footer in the conversation', async 
     f.output.write('HEADER_KEEP\n');
     f.composer.start();f.output.write('BEFORE_RESIZE_KEEP\n');await f.flush();
     f.terminal.resize(80, 30);f.output.rows=30;f.composer.onResize();await f.flush();
-    assert.equal(f.lines().filter(line=>line.includes('Type a follow-up')).length,1,f.lines().join('\n'));
+    assert.equal(f.lines().filter(line=>line.includes('Message poli')).length,1,f.lines().join('\n'));
     f.output.write('AFTER_RESIZE_KEEP\n');f.composer.close();f.output.write('NEXT_PROMPT_KEEP\n');await f.flush();
     const lines=f.lines();
     for(const marker of ['HEADER_KEEP','BEFORE_RESIZE_KEEP','AFTER_RESIZE_KEEP','NEXT_PROMPT_KEEP'])assert.ok(lines.includes(marker),lines.join('\n'));
-    assert.equal(lines.filter(line=>line.includes('Type a follow-up')).length,0,lines.join('\n'));
+    assert.equal(lines.filter(line=>line.includes('Message poli')).length,0,lines.join('\n'));
   } finally { f.composer.close();f.terminal.dispose(); }
 });
 
@@ -97,7 +97,7 @@ test('shrinking terminal height preserves the answer, draft, and restored cursor
     const lines=f.lines();
     for(const marker of ['HEADER_KEEP','BEFORE_SHRINK_KEEP','AFTER_SHRINK_KEEP','NEXT_PROMPT_KEEP'])assert.ok(lines.includes(marker),lines.join('\n'));
     assert.equal(f.composer.draft(),'my draft');
-    assert.equal(lines.filter(line=>line.includes('Type a follow-up')).length,0,lines.join('\n'));
+    assert.equal(lines.filter(line=>line.includes('Message poli')).length,0,lines.join('\n'));
   } finally { f.composer.close();f.terminal.dispose(); }
 });
 
@@ -155,7 +155,8 @@ test('partial output and animated tool status never overwrite messages or drafts
     await f.flush();
     const editableLine = f.lines().find(line => line.includes('follow-up draft'));
     assert.ok(editableLine?.startsWith('› follow-up draft'));
-    assert.ok(editableLine.includes('Running view_file'));
+    assert.ok(f.lines().some(line => line.includes('Running view_file')));
+    assert.ok(!editableLine.includes('Running view_file'));
     f.output.write('MESSAGE_KEEP\n');
     f.output.write('UNTERMINATED_KEEP');
     spinner.stop();
@@ -166,6 +167,36 @@ test('partial output and animated tool status never overwrite messages or drafts
     assert.equal(f.composer.draft(), 'follow-up draft');
     assert.ok(!f.lines().some(line => line.includes('Running view_file')));
   } finally { spinner.stop(); f.composer.close(); f.terminal.dispose(); }
+});
+
+test('activity animates above a full-width draft without repainting the input', async () => {
+  const f = fixture(12, 80);
+  let printed = '';
+  f.output.on('data', chunk => { printed += String(chunk); });
+  try {
+    f.output.write('TRANSCRIPT_KEEP\n');
+    f.composer.start();
+    const draft = 'Write a detailed test for the chat input and keep this whole draft';
+    f.composer.onKey(draft, {});
+    f.composer.setActivity('Replying…', 0, '1.0s');
+    await f.flush();
+    printed = '';
+    f.composer.setActivity('Replying…', 2, '1.1s');
+    await f.flush();
+    const lines = f.lines();
+    assert.ok(lines.includes('TRANSCRIPT_KEEP'));
+    const inputRow = lines.findIndex(line => line.includes(draft));
+    assert.ok(inputRow > 0);
+    assert.match(lines[inputRow - 1], /· ● · Replying · 1.1s/);
+    assert.match(lines[inputRow - 1], /Enter queue · Esc stop/);
+    assert.equal(f.terminal.buffer.active.cursorX, draft.length + 2);
+    assert.ok(!printed.includes(draft), 'animation must not rewrite the draft');
+    f.composer.onKey('\r', {name: 'return'});
+    await f.flush();
+    assert.ok(f.lines().some(line => line.includes('1 queued')));
+    assert.ok(f.lines().some(line => line.includes('Message queued. Add another')));
+    assert.deepEqual(f.composer.drain(), [draft]);
+  } finally { f.composer.close(); f.terminal.dispose(); }
 });
 
 

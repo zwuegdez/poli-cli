@@ -19,7 +19,19 @@ function resultFromJson(data) {
   const choice = data.choices?.[0];
   if (!choice?.message) throw new ApiError('The router returned no assistant message. Try /models or /retry.');
   checkProviderMessage(choice.message);
-  return { message: choice.message, usage: data.usage || null, finishReason: choice.finish_reason, meta: data.poliai || null };
+  const message={...choice.message};
+  if(message.tool_calls!=null) {
+    if(!Array.isArray(message.tool_calls))throw new ApiError('The router returned invalid tool calls. Use /retry.');
+    const ids=new Set();
+    message.tool_calls=message.tool_calls.map(call=>{
+      if(typeof call?.function?.name!=='string'||!call.function.name)throw new ApiError('The router returned an incomplete tool call. Use /retry.');
+      let id=call.id;
+      if(typeof id!=='string'||!id||ids.has(id))id='call_'+crypto.randomBytes(8).toString('hex');
+      ids.add(id);
+      return{...call,id,type:'function',function:{...call.function,arguments:typeof call.function.arguments==='string'?call.function.arguments:JSON.stringify(call.function.arguments??{})}};
+    });
+  }
+  return { message, usage: data.usage || null, finishReason: choice.finish_reason, meta: data.poliai || null };
 }
 
 function checkProviderMessage(message) {

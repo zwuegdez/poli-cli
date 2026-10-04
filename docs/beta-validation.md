@@ -24,7 +24,7 @@ installation remain paused during release preparation.
 
 ## Evidence
 
-`npm test`: **146 passed, 0 failed**. Coverage includes local HTTP/SSE fixtures,
+`npm test`: **147 passed, 0 failed**. Coverage includes local HTTP/SSE fixtures,
 headless terminal resizing/reconnection, input while streaming, tool pairing,
 model handoff, subagent cancellation/permissions, concurrent approvals, context
 recovery, session persistence, and paused public launchers.

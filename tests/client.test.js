@@ -80,3 +80,12 @@ test('repeated or cumulative streamed tool names do not corrupt the function nam
   assert.equal(first.message.tool_calls[0].function.arguments,'{}');
   assert.notEqual(first.message.tool_calls[0].id,second.message.tool_calls[0].id);
 });
+
+test('JSON gateways with missing or repeated IDs still produce paired, serializable tool calls', async t=>{
+  const client=await server(t,(req,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{tool_calls:[{function:{name:'list_dir',arguments:{dir_path:'.'}}},{id:'same',function:{name:'view_file',arguments:'{"file_path":"a.js"}'}},{id:'same',function:{name:'list_dir'}}]}}]}));});
+  const calls=(await client.createChatCompletion({model:'test',messages:[],stream:true})).message.tool_calls;
+  assert.equal(new Set(calls.map(call=>call.id)).size,3);
+  assert.ok(calls.every(call=>typeof call.id==='string'&&call.id.length>0));
+  assert.deepEqual(JSON.parse(calls[0].function.arguments),{dir_path:'.'});
+  assert.equal(calls[2].function.arguments,'{}');
+});

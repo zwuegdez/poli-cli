@@ -7,7 +7,6 @@ import { spawnSync } from 'node:child_process';
 
 const entryFile = fileURLToPath(import.meta.url);
 const rootDir = path.resolve(path.dirname(entryFile), '..');
-const INSTALLER_CMD = 'curl -fsSL https://poliai.qzz.io/poli-cli/install.sh | sh';
 const REPAIR_FLAG = 'POLI_DEP_REPAIR_ATTEMPTED';
 
 // "Cannot find package 'x'" => missing/stale node_modules.
@@ -33,8 +32,7 @@ function adviseAndExit(err) {
     '\npoli could not repair its runtime dependencies automatically.\n\n' +
     'Fix it manually with:\n' +
     `  cd "${rootDir}" && npm install\n\n` +
-    'Or re-run the installer:\n' +
-    `  ${INSTALLER_CMD}\n\n`
+    'The public installer is temporarily unavailable (Coming soon).\n\n'
   );
   process.exit(1);
 }

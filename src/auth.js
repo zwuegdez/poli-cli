@@ -2,11 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import http from 'node:http';
 import { getPoliHomeDir } from './config.js';
-
-// Default preconfigured local proxy key for seamless out-of-the-box operation
-const EMBEDDED_PROXY_KEY = 'sk-poli-50a889c714038b8e9df36fb3f82c10f3dde8ae95c61a0b071ad2b120ac981269';
 
 export function getCredentialsPath() {
   return path.join(getPoliHomeDir(), 'credentials.json');
@@ -73,12 +69,8 @@ export function loadCredentials() {
     }
   }
 
-  // 4. Default embedded proxy key
-  return {
-    apiKey: EMBEDDED_PROXY_KEY,
-    source: 'poli-proxy default key',
-    loginMethod: 'auto-proxy'
-  };
+  // No shared fallback: each user supplies credentials for their endpoint.
+  return { apiKey: '', source: 'not configured' };
 }
 
 export function saveCredentials({ apiKey, baseUrl, loginMethod = 'api_key' }) {

@@ -1,7 +1,7 @@
 {
   "name": "poli-cli",
-  "version": "1.3.3",
-  "description": "Next-generation agentic AI coding CLI powered by poli-proxy",
+  "version": "1.3.4",
+  "description": "Terminal coding assistant with streaming chat and local workspace tools.",
   "main": "src/index.js",
   "type": "module",
   "bin": {
@@ -36,5 +36,13 @@
   },
   "devDependencies": {
     "@xterm/headless": "^6.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zwuegdez/poli-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zwuegdez/poli-cli/issues"
+  },
+  "homepage": "https://github.com/zwuegdez/poli-cli#readme"
 }

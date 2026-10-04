@@ -1,267 +1,181 @@
-# ✦ poli-cli (`poli`)
+# Poli CLI
 
-> **Next-generation Agentic AI Coding Assistant CLI powered by `poli-proxy` router**  
-> Inspired by Google Antigravity, OpenAI Codex, and Anthropic Claude Code.
+[![Tests](https://github.com/zwuegdez/poli-cli/actions/workflows/test.yml/badge.svg)](https://github.com/zwuegdez/poli-cli/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
----
+A terminal coding assistant with streaming chat, local workspace tools, and a
+searchable model picker. Poli CLI focuses on keeping the conversation readable
+and the input usable while a model replies or runs tools, including over SSH.
 
-## ⚡ Quick 1-Line Curl Install
+**Status: early development. Public downloads are coming soon.** The hosted
+installer currently prints “Coming soon” and makes no changes. Source checkout
+is available for development once this repository is public. Existing installed
+copies continue to run.
 
-Install **`poli-cli`** on any Linux or macOS machine with a single curl command:
+## What it does
 
-```bash
-curl -fsSL https://poliai.qzz.io/poli-cli/install.sh | sh
-```
+- **Chat or work on code.** Chat mode sends conversation messages without
+  workspace tools. Agent mode can read and search files, propose edits, and run
+  shell commands.
+- **Choose a model interactively.** `/models` searches your endpoint's catalog
+  and selects a model without discarding the current conversation.
+- **Keep typing during a response.** Draft a follow-up while output streams;
+  Enter queues it and Esc stops the current turn.
+- **Review local actions.** File changes show diffs and request approval.
+  Commands classified as reads can run without a prompt; other commands request
+  approval. `--yes` enables automatic approval.
+- **Inspect and resume.** Compact tool summaries expand with Ctrl+T or
+  `/details`. `/resume` restores a saved conversation for the current workspace.
+- **Use your endpoint.** Configure an OpenAI-compatible chat-completions API.
+  Native function calling is supported; a validated text tool bridge handles
+  models that do not support native tool calls.
 
-*(or: `curl https://poliai.qzz.io/poli-cli/install.sh | sh`)*
+Poli CLI is an independent project. It is not an official OpenAI, Anthropic, or
+Google product. API and model access come from the endpoint you configure, not
+from this repository.
 
-Once installed, the **`poli`** command is immediately available everywhere:
-```bash
-poli --version
-poli
-```
+## Try the interface without an API key
 
----
-
-## 🚀 Overview
-
-`poli-cli` (command: `poli`) is a terminal-native, fully autonomous agentic coding assistant built to write code, refactor codebases, debug errors, navigate large repositories, and run shell commands in pair-programming sessions with developers.
-
-Backed directly by the **`poli-proxy` router** (`https://router.poliai.qzz.io/v1`), `poli-cli` provides zero-latency access to frontier models (including `gpt-6.1-sol`, `claude-fable-5-1`, `claude-opus-5-5`, `grok-4.7`, and `gpt-6-astra`), with live token streaming, agentic function calling, unified diff previews, and safe workspace tool execution. All internal provider details are kept strictly private.
-
----
-
-## ✨ Features
-
-- **⚡ Run Command: `poli`**: Simple, intuitive command accessible anywhere in your shell.
-- **⌨️ Instant Codex-Style Command Menu with `/`**: Just type `/` in the prompt to immediately see the interactive command overlay with arrow key navigation (`↑`/`↓`), `Tab` autocomplete, and type-to-filter.
-- **🤖 Autonomous Agent Loop**: Observes your codebase, plans multi-step solutions, executes tools, evaluates feedback, and refines until the task is complete.
-- **🛠️ Built-in Tool Suite**:
-  - `view_file`: Read workspace files with line numbers, slicing, and truncation protection.
-  - `write_file`: Create new files or overwrite with interactive colored diff review.
-  - `edit_file`: Precise search-and-replace chunk editing with unified diffs.
-  - `run_command`: Run shell commands (builds, tests, git, package managers) with output capture.
-  - `grep_search`: Fast regex/text search across workspace code.
-  - `file_search`: Glob and substring filename search.
-  - `list_dir`: Interactive directory inspection.
-- **💬 Dual Execution Modes**:
-  - **Interactive REPL**: Polished full-terminal interface with a live composer, streaming output, status-aware tool summaries, and slash commands.
-  - **One-Shot Mode**: Run single tasks from command-line arguments: `poli "fix the failing tests"`.
-- **🎨 Full Terminal UI Experience**:
-  - A calm, Codex-inspired transcript: neutral reading text, restrained mint accents, and clear role markers.
-  - A responsive welcome screen that surfaces workspace, branch, model, mode, and approval policy at a glance.
-  - Compact, status-colored tool activity with readable action names, duration, output previews, and full details on demand.
-  - Colorized unified diffs before modifying files.
-  - Interactive approvals (with `-y` / `--yes` bypass flag).
-  - Live animated spinners with elapsed time counter (`[2.4s]`).
-  - Markdown syntax highlighting with labeled, easy-to-scan code blocks.
-  - Live token metrics counter in prompt.
-  - Word-aware wrapping and terminal-cell-aware layout for Unicode and narrow windows.
-  - Scrollable command palette, paste support, and horizontal input scrolling.
-  - Blockwise Markdown streaming that preserves terminal scrollback.
-- **🔄 Multi-Model Switching**:
-  - Type `/models` to open a searchable picker. Use arrow keys and Enter to switch immediately, with conversation history retained. `poli models` opens the same picker outside a session.
-- **🔒 Private Providers**:
-  - All internal upstream provider IDs and names are kept 100% private.
-- **🔌 Powered by `router.poliai.qzz.io`**:
-  - Automatic connection to `https://router.poliai.qzz.io/v1`.
-  - Preconfigured authentication and credential management.
-
----
-
-## 🎯 Quick Start
-
-### 1. Launch Interactive Coding Assistant
-Simply type:
-```bash
-poli
-```
-
-### 2. View All Commands
-In the interactive prompt, type `/`:
-```text
-✦ poli [gpt-6.1-sol] › /
-```
-An interactive Codex-style menu opens immediately: use `↑`/`↓` to navigate and `Tab` or `Enter` to select!
-
-### 3. Run a One-Shot Coding Task
-```bash
-# Ask Poli to perform an action directly
-poli "create an Express web server in server.js on port 4000"
-
-# Auto-approve actions with -y
-poli -y "audit package.json and run npm audit"
-```
-
-### 4. Check Router Health & Configuration
-```bash
-poli status
-```
-
-### 5. Explore & Switch Models
-```bash
-# List all models available on your router
-poli models
-
-# Switch default model
-poli models grok-4.7
-```
-
----
-
-## ⚡ REPL Slash Commands Reference
-
-Inside the interactive `poli` session:
-
-| Command | Arguments | Description |
-|---|---|---|
-| **`/`** or **`/help`** | | Display the interactive Codex-style Command Palette |
-| **`/models`** | | Search and select an available model with arrows and Enter |
-| **`/mode`** | | Choose Agent or Chat mode |
-| **`/retry`** | | Retry a failed request or continue a stopped task |
-| **`/tools`** | | List all active agent tools and parameters |
-| **`/diff`** | | Display uncommitted git diff in the workspace |
-| **`/run`** | `<cmd>` | Execute a shell command directly without LLM turn |
-| **`/status`** | | View router health, model, and session metrics |
-| **`/tokens`** | | Show detailed prompt/completion token metrics |
-| **`/compact`** | | Compress and summarize context window |
-| **`/history`** | | View recent conversation turn history |
-| **`/clear`** | | Clear conversation context and start fresh |
-| **`/config`** | `[get\|set]` | View or modify local CLI configuration |
-| **`/exit`** or **`/quit`** | | Exit the Poli CLI |
-
----
-
-## Preview the UI locally
-
-No API key or router connection is needed:
+Use Node.js 18 or newer and npm. CI exercises Node.js 22 and 24. Git is needed
+for the source checkout.
 
 ```bash
+git clone https://github.com/zwuegdez/poli-cli.git
+cd poli-cli
+npm ci
 npm run ui:preview
 ```
 
-The preview shows the welcome screen, conversation, tool result, and code block.
-In a terminal, try `/`, arrow keys, Tab, or pasting text. Enter closes the preview.
-Use `FORCE_COLOR=1` to force ANSI color, or `NO_COLOR=1` for plain output.
+The preview uses local example output. It does not contact a model or require a
+paid account. Try typing, pasting, `/`, arrow keys, and Tab; Enter closes it.
+Use `NO_COLOR=1` for plain terminal output.
 
-Enter sends a message; Ctrl+J inserts a newline. Shift+Enter or Alt+Enter also inserts
-a newline when supported by your terminal. Multiline paste preserves line breaks and
-indentation in one message, displayed with `↵` markers in the editable row. Long drafts
-scroll horizontally with `‹` / `›` markers, and history recalls multiline messages intact.
+## Run from source
 
-Input shortcuts: Home / Ctrl+A, End / Ctrl+E, Ctrl+U to clear before the cursor,
-and Ctrl+K to clear after it. Ctrl/Alt+Left and Right move by word; Ctrl+W or
-Alt+Backspace deletes the previous word. Emoji and combined characters are edited
-as whole characters. Ctrl+C clears the idle draft; on an empty draft it exits.
-Enter on a command with required arguments
-fills the command first. `/models` opens the model picker without typing a model name.
-
-### Conversation and agent execution
-
-Agent mode supports ordinary conversation and optional workspace tools. For models
-without native function calling, poli uses dedicated `poli-tool` JSON blocks to request
-local tools; these requests are validated and use the same approval flow. Native tool
-models use the router's function-calling protocol. The picker describes both modes.
-Availability and tool reliability still depend on the upstream model.
-
-Use `/mode` to choose Chat for conversation without tools, or start with `poli --chat`.
-The agent has no fixed step limit. Ctrl+C / Esc stops a running request or shell command
-and returns to the prompt; `/retry` continues afterwards. While poli works, the composer
-stays available directly below the chat: type a follow-up and press Enter to queue
-it. Queued messages are processed after the current response or tool batch completes.
-Unsent drafts and submitted messages survive cancellation. The composer pauses for
-explicit tool approvals. Shell output appears as complete lines. Chat and tool results stay
-unframed; fenced code gets a concise language label and a light left gutter. The working
-indicator is a small animated dot.
-Output uses normal terminal scrollback; use your terminal’s scrollbar, mouse wheel, or
-Shift+PageUp / Shift+PageDown to browse earlier messages.
-The adaptive welcome screen groups workspace, branch, model, mode, and approval state, then offers a clear first step. User messages
-appear once with a `›` prompt; assistant replies use the Poli mark. Tool results use compact status-colored action summaries
-(for example, `✓ Read src/app.js · 68 lines · 12ms`), with extra detail for failures. The model
-picker marks the active choice with a check. Input shortcuts appear beside a draft
-when the terminal has enough room.
-The chat keeps one blank line between messages. Model and mode stay in the welcome
-screen; `/status` and `/tokens` show details on demand. Reading text follows the terminal's default foreground, while color highlights
-navigation, status, and syntax. The input stays separate from the animated action status,
-with a reply indicator during chat and an action label during tool execution. The input uses a thin cursor, restored
-to the terminal default when poli releases the keyboard.
-CLI labels and status messages are in English (`Replying…`, `Preparing action…`).
-Activity rows use compact `✓`, `×`, and `!` status marks with indented results. File changes include numbered
-red/green previews. Commands show a short output preview after completion; Ctrl+T or
-`/details` shows the latest completed tool result without submitting it to the model.
-Ctrl+T preserves the current draft, both during work and at the idle prompt.
-Use `/details 2` to inspect the second most recent tool result; `/details` and Ctrl+T
-show the latest result. Markdown tables align their columns on wide terminals and
-become labeled rows on narrow ones.
-
-### Resume a conversation
-
-`/resume` opens a searchable list of saved conversations for the current workspace.
-Use `/resume <id>` or `poli resume <id>` to choose one directly. Without an interactive
-terminal, `poli resume` lists the available IDs. Context and token usage are restored;
-the current model, mode, and approval settings still apply. Damaged session files and
-sessions from other workspaces are excluded. An interrupted tool batch gets explicit
-stopped results for unfinished calls; resuming never silently executes those calls.
-
-### Input and status
-The composer follows a Codex-style layout: a separate animated activity line during
-work, compact model/mode and shortcut rows, and a plain `›` input on the last row.
-There are no frames or background bars. Green accents highlight the prompt and model;
-message text uses the terminal's foreground. The activity line shows elapsed time and
-Esc to stop. Enter queues follow-ups during work, with the count shown above the input.
-Ctrl+J inserts a newline; slash suggestions open above the input. Animation
-updates the activity row without rewriting the draft. The layout uses native terminal
-scrollback and adapts to mobile keyboard size changes.
-Without an interactive terminal, changes requiring approval are declined unless `-y`
-is supplied. Requests time out after 120 seconds by default; configure
-`requestTimeoutMs` if your model needs more time. Shell commands default to 120 seconds;
-a tool may request `timeout_seconds: 0` for no command timeout.
-
----
-
-## ⚙️ Configuration & Auth
-
-`poli-cli` stores configuration in `~/.poli-code/config.json`.
+Supply your own API key for the chosen endpoint. Keys are read from
+`POLIAI_API_KEY`, then `POLI_API_KEY`, then supported local credential files.
+There is no bundled shared key. `poli login` stores a key locally when using an
+installed copy; from the checkout, use `node bin/poli.js login`.
 
 ```bash
-# View configuration
-poli config
+# Configure your endpoint; include its /v1 prefix when required.
+node bin/poli.js config set baseUrl https://your-endpoint.example/v1
 
-# Change custom router base URL
-poli config set baseUrl https://router.poliai.qzz.io/v1
+# Read the key without adding its value to shell history (bash).
+read -rsp 'API key: ' POLI_API_KEY; printf '\n'
+export POLI_API_KEY
 
-# Change default model
-poli config set model gpt-6.1-sol
+# Browse the endpoint's models and select one.
+node bin/poli.js models
 
-# Login with API key
-poli login
+# Start with chat only, or enable workspace tools.
+node bin/poli.js --chat
+node bin/poli.js --agent
 ```
 
----
-
-## 🛠️ Troubleshooting
-
-### `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'marked'`
-
-The installed copy's `node_modules` is missing or out of sync with the code
-(this can happen if the dependency install step was interrupted, or the
-installation was updated with `git pull` without reinstalling). Fix it with:
+The default endpoint is `https://router.poliai.qzz.io/v1`; it requires your own
+credentials and does not provide free model access. For a single task:
 
 ```bash
-cd ~/.poli-cli && npm install
+node bin/poli.js --model YOUR_MODEL "explain the failing tests"
 ```
 
-or re-run the installer:
+Endpoint compatibility, availability, costs, and model tool reliability vary.
+Changing the CLI's endpoint does not make incompatible provider APIs compatible.
+
+## Keyboard and commands
+
+| Key | Action |
+| --- | --- |
+| Enter | Send, or queue a follow-up during work |
+| Ctrl+J | Insert a newline |
+| Up / Down | Recall input history; navigate a menu when open |
+| Tab | Fill a slash command |
+| Esc | Close a menu or stop the running turn |
+| Ctrl+T | Inspect the latest completed tool result |
+| Ctrl+C | Clear an idle draft; exit when it is empty |
+
+Multiline paste retains line breaks and indentation. Long drafts scroll within
+the editable row. Chat output uses normal terminal scrollback; scrolling controls
+are provided by your terminal client.
+
+| Command | Purpose |
+| --- | --- |
+| `/help` | List slash commands and shortcuts |
+| `/models` | Search and select a model |
+| `/mode` | Choose Chat or Agent |
+| `/retry` | Retry or continue the last task |
+| `/tools` | List tool names and argument schemas |
+| `/details [number]` | Inspect a recent completed tool result |
+| `/resume [id]` | Resume a saved conversation in this workspace |
+| `/diff` | Show uncommitted workspace changes |
+| `/run <command>` | Run a shell command |
+| `/status`, `/tokens` | Inspect connection and token information |
+| `/compact`, `/history`, `/clear` | Manage conversation context |
+| `/config` | Inspect or change configuration |
+| `/exit` | Exit |
+
+Configuration, credentials, sessions, and input history are stored under
+`~/.poli-code/`. Set `POLI_CODE_HOME` to choose a separate location. Session files
+and history can contain prompts, code, and tool output; keep them private.
+`/compact` reduces retained context; it is not a model-generated summary.
+
+## Local execution and data
+
+Workspace tools run with your operating-system permissions. Approval prompts
+are not a filesystem or process sandbox: absolute paths and shell commands can
+access resources outside the current directory. Inspect proposed actions and
+use a disposable checkout or container for untrusted tasks. `--yes` removes
+interactive approval prompts.
+
+Prompts, requested file contents, and tool results are sent to your configured
+inference endpoint. Its operator's data policies and billing apply. Do not feed
+secrets into a conversation or share credential/session files in an issue.
+There is no fixed agent step limit; use Esc to stop an ongoing task. Requests
+have a configurable timeout (`requestTimeoutMs`, 120 seconds by default).
+
+## Development and validation
 
 ```bash
-curl -fsSL https://poliai.qzz.io/poli-cli/install.sh | sh
+npm ci
+npm test
+npm run ui:preview
 ```
 
-Recent versions of `poli` detect this situation and try to repair it
-automatically; the commands above are the manual equivalent.
+The tests use local HTTP fixtures and a headless terminal. They cover fragmented
+streaming responses, tool dispatch and errors, approval/cancellation behavior,
+conversation resume, Unicode input, model selection, and resize/reconnect
+rendering. They do not need production credentials or a live model endpoint.
+Passing terminal simulations does not establish compatibility with every SSH
+client; real-client reports are still needed.
 
----
+| Location | Responsibility |
+| --- | --- |
+| `src/cli.js`, `src/commands/` | CLI arguments and interactive commands |
+| `src/client.js` | Chat-completions transport and streaming |
+| `src/agent.js`, `src/tool-bridge.js` | Agent turns and tool-call fallback |
+| `src/tools/` | Local filesystem and shell operations |
+| `src/ui/` | Input editing, terminal layout, Markdown, diffs, and activity |
+| `src/session.js`, `src/config.js`, `src/auth.js` | Local state and configuration |
+| `tests/` | Automated regression tests |
 
-## 📄 License
+## Known limitations and next work
 
-MIT © 2026 poliai (`zwuegdez`)
+- **Mobile SSH rendering:** reconnect and keyboard resize bugs have been
+  reported. Regression coverage is growing, but real iPad/SSH-client validation
+  is still in progress.
+- **Provider compatibility:** text tool requests depend on the model following
+  the schema. A model may produce invalid requests or unsupported responses.
+- **Platform coverage:** cross-platform behavior, especially Windows shell
+  cancellation and terminal handling, needs more validation.
+- **Release readiness:** public installers are paused while documentation,
+  credential handling, and the launch process are prepared.
+
+Useful contributions include reproducible terminal bug reports, provider fixture
+cases with secrets removed, accessibility improvements, and focused fixes with
+regression coverage. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting.
+
+## License
+
+[MIT](LICENSE). Third-party model services are separate from this license.

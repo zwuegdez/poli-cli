@@ -171,3 +171,10 @@ test('an already aborted signal handles a rejecting in-flight promise', async ()
   await assert.rejects(withSignal(Promise.reject(new Error('Late provider failure')), controller.signal), /abort/i);
   await new Promise(resolve => setImmediate(resolve));
 });
+
+test('malformed subagent tool output is retried and cannot become a success report',async t=>{
+ let requests=0;
+ const {manager}=fixture(t,async()=>requests++===0?response('Reading.poli-tool\n{&quot;name&quot;:&quot;list_dir&quot;,&quot;arguments&quot;:{}}'):requests===2?response('```poli-tool\n{"name":"list_dir","arguments":{"dir_path":"."}}\n```'):response('Inspected workspace.'));
+ manager.spawn_agent({task:'Inspect files'});const result=await manager.wait_agent();
+ assert.equal(requests,3);assert.equal(result.agents[0].actions[0].name,'list_dir');assert.equal(result.agents[0].status,'completed');
+});

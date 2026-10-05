@@ -115,9 +115,15 @@ export class PoliAgent {
         }
         turnInput.setContext?.(this.getContext());
         let bridge = agentMode && (this.modelInfo?.capabilities?.tools === false || this.bridgeModels.has(this.config.model));
-        let streamed = '', first = true;
+        let streamed = '', first = true, malformedOutput = false;
         const output = new MarkdownStream(write, {
-          transform: text => agentMode ? parseBridgeCalls(text).content : text,
+          transform: text => {
+            if (!agentMode) return text;
+            if (malformedOutput) return '';
+            const parsed = parseBridgeCalls(text);
+            malformedOutput = parsed.protocolError;
+            return parsed.content;
+          },
         });
         const beginResponse = () => {
           if (!first) return;
@@ -176,18 +182,26 @@ export class PoliAgent {
         const message = response.message || {};
         let content = message.content || streamed || '';
         let calls = message.tool_calls || [];
+        let protocolError = false;
         if (agentMode) {
           const parsed = parseBridgeCalls(content);
           content = parsed.content;
+          protocolError = parsed.protocolError;
           calls = combineToolCalls(calls, parsed.calls);
         }
         if (!agentMode) calls = [];
-        if (agentMode && !calls.length && !formatRepaired && /tool\s*call\s*:\s*(?:view_file|list_dir|run_command|edit_file|write_file|grep_search|file_search)\b|(?:can't|cannot|don't|do not|no).{0,50}(?:access.{0,30}(?:file|tool|workspace)|read.{0,20}(?:local|file))|(?:cannot|can't|don't|do not).{0,30}(?:read|edit|execute|run).{0,25}(?:files?|commands?)/i.test(content)) {
+        if (agentMode && !calls.length && !formatRepaired && (protocolError || /tool\s*call\s*:\s*(?:view_file|list_dir|run_command|edit_file|write_file|grep_search|file_search)\b|(?:can't|cannot|don't|do not|no).{0,50}(?:access.{0,30}(?:file|tool|workspace)|read.{0,20}(?:local|file))|(?:cannot|can't|don't|do not).{0,30}(?:read|edit|execute|run).{0,25}(?:files?|commands?)/i.test(content))) {
           formatRepaired = true;
           this.bridgeModels.add(this.config.model);
           this.session.addMessage({ role: 'assistant', content });
           this.session.addMessage({ role: 'user', content: 'Local tool protocol error: your attempted tool call was NOT executed because it used the wrong format. Emit a dedicated ```poli-tool fenced block containing {"name":"tool_name","arguments":{...}} with the exact schema parameter names from the system instructions. Then wait for the tool result. Do not ask the user to execute it.' });
           continue;
+        }
+        if (!calls.length && protocolError) {
+          this.lastTurnFailed = true;
+          log(style.yellow('The model could not format its tool request. No action was executed. Try /retry or select another model with /models.'));
+          this.session.addMessage({ role: 'assistant', content: 'Tool request failed: no action was executed.' });
+          break;
         }
         if (!calls.length) {
           this.session.addMessage({ role: 'assistant', content });

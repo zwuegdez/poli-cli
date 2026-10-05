@@ -13,7 +13,7 @@ To list the workspace emit:
 \`\`\`poli-tool
 {"name":"list_dir","arguments":{"dir_path":"."}}
 \`\`\`
-Use the exact parameter names from the schemas below. Ordinary json blocks and prose such as "Tool call: view_file" DO NOT invoke tools. After emitting a request, end your response and wait for the result. The CLI validates requests and asks for approval for changes. You may emit several separate poli-tool blocks. Do not claim success before reading the returned tool result. For greetings and ordinary conversation, answer naturally without requesting a tool. Do not put executable tool blocks in documentation or examples.
+Use the exact parameter names from the schemas below. For apply_patch, supply a standard unified diff with ---/+++ file headers and numbered @@ -old,count +new,count @@ hunks; never mix it with *** End Patch or unnumbered @@ markers. Ordinary json blocks and prose such as "Tool call: view_file" DO NOT invoke tools. After emitting a request, end your response and wait for the result. The CLI validates requests and asks for approval for changes. You may emit several separate poli-tool blocks. Do not claim success before reading the returned tool result. For greetings and ordinary conversation, answer naturally without requesting a tool. Do not put executable tool blocks in documentation or examples.
 Available local tool schemas:
 ${native ? 'Use the native schemas supplied with this request for exact argument types and required parameters.' : JSON.stringify(tools.map(t => t.function))}`;
 }
@@ -32,11 +32,19 @@ export function combineToolCalls(native = [], bridged = []) {
   return [...native, ...bridged.filter(call => !signatures.has(signature(call)))];
 }
 
+// Decode only an invalid outer JSON envelope. Valid JSON arguments may contain
+// literal HTML entities and must be preserved byte for byte.
+function decodeToolEnvelope(raw) {
+  return raw.replace(/&(quot|apos|lt|gt|amp|#39|#34);/g, (_, entity) => ({quot:'"', apos:"'", lt:'<', gt:'>', amp:'&', '#39':"'", '#34':'"'})[entity]);
+}
+
 export function parseBridgeCalls(text) {
   const calls = [];
-  const content = text.replace(/^[ \t]*```poli-tool[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*$/gm, (_, raw) => {
+  let content = text.replace(/^[ \t]*```poli-tool[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*$/gm, (_, raw) => {
     try {
-      const request = JSON.parse(raw);
+      let request;
+      try { request = JSON.parse(raw); }
+      catch { request = JSON.parse(decodeToolEnvelope(raw)); }
       if (typeof request.name !== 'string' || !request.arguments || typeof request.arguments !== 'object' || Array.isArray(request.arguments)) throw new Error('Expected name and arguments object');
       calls.push({ id: `bridge_${crypto.randomBytes(8).toString('hex')}`, type: 'function', function: { name: request.name, arguments: JSON.stringify(request.arguments) } });
     } catch (error) {
@@ -44,7 +52,18 @@ export function parseBridgeCalls(text) {
     }
     return '';
   }).trim();
-  return { content, calls };
+  // An unfenced marker is a protocol failure, never authorization to execute.
+  // Ignore markers inside ordinary documentation/code fences.
+  let outside = '';
+  let offset = 0;
+  for (const match of content.matchAll(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g)) {
+    outside += content.slice(offset, match.index) + ' '.repeat(match[0].length);
+    offset = match.index + match[0].length;
+  }
+  outside += content.slice(offset);
+  const malformed = /\bpoli-tool\s*(?=\{\s*(?:"|&quot;))/.exec(outside);
+  if (malformed) content = content.slice(0, malformed.index).trim();
+  return { content, calls, protocolError: !!malformed };
 }
 
 // Chat-only transports cannot accept role=tool or assistant.tool_calls.

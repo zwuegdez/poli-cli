@@ -319,3 +319,24 @@ test('parent streaming output cannot overwrite a subagent approval question', ()
     }finally{process.stdout.write=original;fs.rmSync(dir,{recursive:true,force:true});}
   `);
 });
+
+test('escaped fenced tool envelopes decode without corrupting valid HTML arguments',()=>{
+  const parsed=parseBridgeCalls('```poli-tool\n{&quot;name&quot;:&quot;view_file&quot;,&quot;arguments&quot;:{&quot;file_path&quot;:&quot;README.md&quot;}}\n```');
+  assert.equal(parsed.calls[0].function.name,'view_file');
+  assert.deepEqual(JSON.parse(parsed.calls[0].function.arguments),{file_path:'README.md'});
+  const html=parseBridgeCalls('```poli-tool\n'+JSON.stringify({name:'write_file',arguments:{file_path:'a.html',content:'&quot; &amp;'}})+'\n```');
+  assert.equal(JSON.parse(html.calls[0].function.arguments).content,'&quot; &amp;');
+});
+test('unfenced tool output is hidden and repaired, never executed directly',()=>{
+  const malformed='Working.poli-tool\n{&quot;name&quot;:&quot;list_dir&quot;,&quot;arguments&quot;:{}}';
+  const parsed=parseBridgeCalls(malformed);
+  assert.equal(parsed.protocolError,true);assert.equal(parsed.calls.length,0);assert.equal(parsed.content,'Working.');
+  const docs=parseBridgeCalls('```text\n'+malformed+'\n```');assert.equal(docs.protocolError,false);
+  const output=scenario(`let requests=0,actions=0;
+    const agent=new PoliAgent({session,config:{model:'test'},execute:async()=>{actions++;return {files:['hello']}},client:{async createChatCompletion(body){
+      if(requests++===0)return {message:{content:${JSON.stringify(malformed)}}};
+      if(requests===2){assert.match(body.messages.at(-1).content,/NOT executed/);return {message:{content:'\`\`\`poli-tool\\n{"name":"list_dir","arguments":{}}\\n\`\`\`'}};}
+      return {message:{content:'Found hello'}};
+    }}});await agent.runTurn('list files');assert.equal(actions,1);assert.equal(requests,3);`);
+  assert.doesNotMatch(output,/&quot;|poli-tool/);
+});

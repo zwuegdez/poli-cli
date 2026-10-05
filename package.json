@@ -1,6 +1,6 @@
 {
   "name": "poli-cli",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Terminal coding assistant with streaming chat and local workspace tools.",
   "main": "src/index.js",
   "type": "module",

@@ -108,11 +108,12 @@ export class SubagentManager {
       const parsed = parseBridgeCalls(message.content || '');
       const calls = combineToolCalls(message.tool_calls, parsed.calls);
       if (!calls.length) {
-        if (!repaired && /(?:cannot|can't|do not|don't|no).{0,55}(?:access.{0,25}(?:files?|tools?|workspace)|read.{0,25}(?:local|files?))/i.test(parsed.content)) {
+        if (!repaired && (parsed.protocolError || /(?:cannot|can't|do not|don't|no).{0,55}(?:access.{0,25}(?:files?|tools?|workspace)|read.{0,25}(?:local|files?))/i.test(parsed.content))) {
           repaired = true; bridge = true;
-          messages.push({ role: 'assistant', content: parsed.content }, { role: 'user', content: 'Local tools are available. Use the supplied poli-tool schemas for needed workspace actions. Do not ask the user to run them.' });
+          messages.push({ role: 'assistant', content: parsed.content }, { role: 'user', content: 'Local tools are available. Emit a dedicated ```poli-tool fenced block containing valid JSON with name and arguments using the supplied schemas for needed workspace actions, then wait for the tool result. Do not ask the user to run them.' });
           continue;
         }
+        if (parsed.protocolError) { job.status='failed'; return this.outcome(job,{error:'Tool request failed: no action was executed.'}); }
         job.status = parsed.content.trim() ? 'completed' : 'failed';
         messages.push({role:'assistant',content:parsed.content});
         return this.outcome(job, { ...(job.status === 'failed' ? { error: 'Subagent returned no report.' } : { report: parsed.content.slice(0, 8000) }), ...(response.finishReason === 'length' || parsed.content.length > 8000 ? { truncated: true } : {}) });

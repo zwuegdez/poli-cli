@@ -7,6 +7,31 @@ import { Spinner } from '../src/ui/spinner.js';
 import { ComposerView, inputLine, composerFooter } from '../src/ui/composer-view.js';
 const { Terminal } = headless;
 
+test('multiline input survives resize, streaming, and editing without stale draft rows', async () => {
+  const f = fixture(24,90);
+  try {
+    f.output.write('MULTILINE_HISTORY_KEEP\n');f.composer.start();
+    f.composer.onKey('draft first\ndraft second\ndraft third',{});
+    await f.flush();
+    for (const columns of [40,90,30,100]) {
+      f.terminal.resize(columns,24);f.output.columns=columns;
+      f.composer.onResize();
+      f.output.write('Progress at ' + columns + '\n');
+      await f.flush();
+      for(const text of ['draft first','draft second','draft third']) assert.equal(f.lines().filter(line=>line.includes(text)).length,1,f.lines().join('\n'));
+      assert.ok(f.lines().includes('MULTILINE_HISTORY_KEEP'));
+    }
+    f.composer.onKey(null,{name:'up'});await f.flush();
+    assert.equal(f.lines().filter(line=>line.includes('draft third')).length,0);
+    assert.equal(f.lines().filter(line=>line.includes('draft second')).length,1);
+    f.composer.onKey(null,{name:'down'});await f.flush();
+    assert.equal(f.lines().filter(line=>line.includes('draft third')).length,1);
+    f.composer.onKey(null,{name:'return'});await f.flush();
+    assert.deepEqual(f.composer.drain(),['draft first\ndraft second\ndraft third']);
+    for(const text of ['draft first','draft second','draft third']) assert.equal(f.lines().filter(line=>line.includes(text)).length,0);
+  }finally{f.composer.close();f.terminal.dispose();}
+});
+
 test('subagent activity grows and shrinks without duplicating the composer or erasing history', async () => {
   const f = fixture(24, 90);
   try {
@@ -377,8 +402,7 @@ test('activity and model context stay above the draft without repainting it', as
     const inputRow = lines.findIndex(line => line.includes(draft));
     assert.ok(inputRow > 0);
     assert.ok(lines[inputRow].startsWith('› '));
-    assert.match(lines[inputRow - 4], /• Replying \(1s · Esc to stop\)/);
-    assert.equal(lines[inputRow - 3], '');
+    assert.match(lines[inputRow - 3], /• Replying · 1s/);
     assert.match(lines[inputRow - 2], /poli · agent/);
     assert.match(lines[inputRow - 1], /Enter queue · Esc stop/);
     assert.equal(f.terminal.buffer.active.cursorX, draft.length + 2);

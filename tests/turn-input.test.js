@@ -71,6 +71,37 @@ test('Ctrl+T opens tool details while preserving the draft and running turn', ()
   } finally { f.composer.close(); }
 });
 
+test('busy slash controls execute directly and are not queued for the model', () => {
+  const f=fixture(), commands=[];
+  f.composer.onCommand = command => { commands.push(command); f.output.write('Context report\n'); return true; };
+  f.composer.start();
+  try {
+    f.composer.onKey('/context',{});
+    f.composer.onKey(null,{name:'return'});
+    assert.deepEqual(commands,['/context']);
+    assert.deepEqual(f.composer.drain(),[]);
+    assert.equal(f.composer.draft(),'');
+    assert.equal(f.controller.signal.aborted,false);
+    f.composer.onKey('next task',{});
+    f.composer.onKey(null,{name:'return'});
+    assert.deepEqual(f.composer.drain(),['next task']);
+  } finally { f.composer.close(); }
+});
+
+test('Up and Down edit a multiline draft without submitting or losing text', () => {
+  const f=fixture();f.composer.start();
+  try {
+    f.composer.onKey('first\nsecond',{});
+    f.composer.onKey(null,{name:'up'});
+    f.composer.onKey('!',{});
+    assert.equal(f.composer.draft(),'first!\nsecond');
+    f.composer.onKey(null,{name:'down'});
+    f.composer.onKey('?',{});
+    assert.equal(f.composer.draft(),'first!\nsecond?');
+    assert.deepEqual(f.composer.drain(),[]);
+  } finally {f.composer.close();}
+});
+
 test('newline shortcuts, word deletion, and emoji editing preserve the queued text', () => {
   const f=fixture();f.composer.start();
   try {

@@ -1,12 +1,12 @@
 import readline from 'node:readline';
-import { ComposerView, inputLine, composerFooter, workingStatus, subagentStatus } from './composer-view.js';
-import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
+import { ComposerView, draftRows, composerFooter, workingStatus, subagentStatus } from './composer-view.js';
+import { draftViewport, verticalCursor, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
 
 // Keep activity, input, and model hints together after the transcript. Use normal scrolling so
 // every completed output line enters native scrollback; never set scroll margins.
 export class TurnInput {
-  constructor({ controller, onSubmit, onDetails, model = 'poli', mode = 'agent', input = process.stdin, output = process.stdout, error = process.stderr }) {
-    Object.assign(this, { controller, onSubmit, onDetails, model, mode, input, output, error });
+  constructor({ controller, onSubmit, onDetails, onCommand, model = 'poli', mode = 'agent', input = process.stdin, output = process.stdout, error = process.stderr }) {
+    Object.assign(this, { controller, onSubmit, onDetails, onCommand, model, mode, input, output, error });
     this.queue = [];
     this.buffer = [];
     this.cursor = 0;
@@ -63,13 +63,12 @@ export class TurnInput {
   draw() {
     if (!this.active || !this.view.renderable) return;
     const width = Math.max(8, this.output.columns || 80);
-    const input = inputViewport(this.buffer, this.cursor, width - 4, this.viewStart);
+    const input = draftViewport(this.buffer, this.cursor, width - 4, {previousStart:this.viewStart,maxRows:Math.min(3,Math.max(1,(this.output.rows || 24) - 7))});
     this.viewStart = input.start;
-    const placeholder = 'Ask Poli to build, fix, or explain…';
-    const line = inputLine(this.buffer.length ? input.text : placeholder, width, {placeholder: !this.buffer.length});
+    const {line, rows:inputRows} = draftRows(input, width, {empty:!this.buffer.length,mode:this.mode});
     const agentLine = subagentStatus(this.agents, width);
     const agentRow = agentLine ? [agentLine] : [];
-    const rows = [workingStatus(this.activity, this.elapsed, this.frameIndex || 0, width), ...agentRow, '', ...composerFooter({model: this.model, mode: this.mode, width, working: true, queued: this.queue.length, lines: input.lines, context: this.context}), line.row];
+    const rows = [workingStatus(this.activity, this.elapsed, this.frameIndex || 0, width), ...agentRow, ...composerFooter({model: this.model, mode: this.mode, width, working: true, queued: this.queue.length, lines: input.lines, lineNumber:input.lineNumber, context: this.context}), ...inputRows];
     this.view.paint(rows, rows.length - 1, 2 + input.cursorColumn, line);
   }
   setActivity(text, frame = 0, elapsed = '') {
@@ -106,13 +105,18 @@ export class TurnInput {
     if (key.name === 'return' || key.name === 'enter') {
       const message = this.buffer.join('');
       if (message.trim()) {
-        this.queue.push(message);
-        this.onSubmit?.(message);
-        this.notice = 'Queued';
         this.buffer = [];
         this.cursor = 0;
+        // Clear the command draft before its output redraws the composer.
+        const handled = message.trim().startsWith('/') && this.onCommand?.(message.trim());
+        if (!handled) {
+          this.queue.push(message);
+          this.onSubmit?.(message);
+          this.notice = 'Queued';
+        }
       }
-    } else if (key.name === 'left') this.cursor = key.ctrl || key.meta ? wordBoundary(this.buffer, this.cursor, -1) : Math.max(0, this.cursor - 1);
+    } else if (key.name === 'up' || key.name === 'down') { this.cursor = verticalCursor(this.buffer,this.cursor,key.name === 'up' ? -1 : 1); this.viewStart = 0; }
+    else if (key.name === 'left') this.cursor = key.ctrl || key.meta ? wordBoundary(this.buffer, this.cursor, -1) : Math.max(0, this.cursor - 1);
     else if (key.name === 'right') this.cursor = key.ctrl || key.meta ? wordBoundary(this.buffer, this.cursor, 1) : Math.min(this.buffer.length, this.cursor + 1);
     else if (key.name === 'home' || key.ctrl && key.name === 'a') this.cursor = 0;
     else if (key.name === 'end' || key.ctrl && key.name === 'e') this.cursor = this.buffer.length;

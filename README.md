@@ -29,8 +29,9 @@ product. Model services and API access are separate from this repository.
 - **Model selection:** a searchable catalog picker that retains conversation
   context when switching models, with a factual handoff of earlier requests and
   recorded tool results. `search_history` can recover compacted turns.
-- **Responsive input:** drafts and queued follow-ups during streaming, multiline
-  paste, Unicode-aware editing, and cancellation.
+- **Responsive input:** a frameless multiline editor with light green activity
+  cues, visible pasted lines, Unicode-aware editing, and queued follow-ups during
+  streaming. Up/Down edits multiline drafts; Ctrl+J inserts a newline.
 - **Permissions:** `/permission` selects Read-only, Ask before changes, or
   Full access; `/permision` and `/permissions` are aliases. The choice is saved
   for future sessions. Read-only blocks edits, patches, and shell commands.
@@ -48,7 +49,9 @@ product. Model services and API access are separate from this repository.
 - **Subagents:** delegate independent tasks to up to three concurrent agents.
   Explorers and reviewers are read-only; workers inherit the current permissions.
   Agents share the workspace, use separate conversations, and return reports
-  alongside actual tool outcomes. `/agents` shows their status. Cancellation stops
+  alongside actual tool outcomes. `/agents` shows their status; `/agents <id>`
+  opens a report and `/agents stop <id>` stops one child. These controls and
+  `/context` also work while the parent runs. Cancellation stops
   delegated work, and approval prompts are serialized. Full delegated transcripts
   persist with the session and remain searchable with attributed results.
 - **Transport compatibility:** OpenAI-compatible chat completions with native

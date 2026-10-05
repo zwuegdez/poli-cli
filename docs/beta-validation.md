@@ -1,6 +1,6 @@
-# Beta validation — v1.4.0
+# Beta validation — v1.4.1
 
-Validated on 2026-10-04. The VPS runtime is enabled; public launchers and
+Validated on 2026-10-05. The VPS runtime is enabled; public launchers and
 installation remain paused during release preparation.
 
 ## Changes
@@ -22,12 +22,22 @@ installation remain paused during release preparation.
 - Session saves replace files atomically with private permissions. File edits
   awaiting approval reject stale contents rather than overwriting another change.
 
+- The composer shows up to three real draft lines, supports vertical Unicode
+  editing, and keeps its cursor on the bottom row. Busy-time `/context`,
+  `/agents`, and `/details` commands execute directly rather than becoming AI
+  prompts. Individual children can be inspected or stopped. Context remaining
+  space includes the configured output reserve.
+
 ## Evidence
 
-`npm test`: **147 passed, 0 failed**. Coverage includes local HTTP/SSE fixtures,
+`npm test`: **157 passed, 0 failed**. Coverage includes local HTTP/SSE fixtures,
 headless terminal resizing/reconnection, input while streaming, tool pairing,
 model handoff, subagent cancellation/permissions, concurrent approvals, context
 recovery, session persistence, and paused public launchers.
+
+A real PTY smoke check verified idle multiline editing, slash controls during
+streaming, a queued follow-up, tiny-window resizing, and clean exit against a
+local SSE fixture.
 
 Live requests through the configured router with `kimi-k3` read a synthetic
 marker file through the text bridge. A delegated explorer independently read

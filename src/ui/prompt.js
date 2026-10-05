@@ -1,9 +1,9 @@
 // Interactive Prompt and Readline Manager with Codex-style "/" command menu
 import readline from 'node:readline';
-import { ComposerView, inputLine, composerFooter } from './composer-view.js';
+import { ComposerView, draftRows, composerFooter } from './composer-view.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { inputViewport, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
+import { draftViewport, verticalCursor, normalizeInput, splitInput, wordBoundary } from './input-layout.js';
 import { colors, style, accent, cellWidth, truncate, terminalWidth, plainText } from './theme.js';
 
 export const COMMAND_LIST = [
@@ -12,7 +12,8 @@ export const COMMAND_LIST = [
   { cmd: '/permission', args: '', desc: 'Choose Read-only, Ask before changes, or Full access', alias: ['/permision', '/permissions'], category: 'Agent & Model' },
   { cmd: '/mode', args: '', desc: 'Choose Agent (workspace tools) or Chat', category: 'Agent & Model' },
   { cmd: '/retry', args: '', desc: 'Retry or continue the last task', category: 'Session & Memory' },
-  { cmd: '/agents', args: '', desc: 'List subagents and their task status', category: 'Agent & Model' },
+  { cmd: '/agents', args: '[id|stop <id>|stop all]', desc: 'Inspect or stop subagents · also works during a task', category: 'Agent & Model' },
+  { cmd: '/stop', args: '', desc: 'Stop the current task · drafts and history are kept', category: 'Agent & Model' },
   { cmd: '/tools', args: '', desc: 'Display all agent tools and capabilities', category: 'Agent & Model' },
   { cmd: '/details', args: '[number]', desc: 'Inspect tool results · 1 is latest · Ctrl+T', category: 'Agent & Model' },
   { cmd: '/resume', args: '[id]', desc: 'Resume a saved conversation in this workspace', category: 'Session & Memory' },
@@ -107,12 +108,12 @@ export class PromptManager {
       const render = () => {
         if (!view.renderable) return;
         const width = Math.max(8, stdout.columns || 80);
-        const input = inputViewport(buffer, cursor, width - 4, viewStart);
+        const input = draftViewport(buffer, cursor, width - 4, {previousStart:viewStart,maxRows:Math.min(3,Math.max(1,(stdout.rows || 24) - 7))});
         viewStart = input.start;
         const items = matches();
         selected = items.length ? (selected + items.length) % items.length : 0;
-        const line = inputLine(buffer.length ? input.text : 'Ask Poli to build, fix, or explain…', width, {placeholder: !buffer.length});
-        const rows = ['', ...composerFooter({model, mode, width, lines: input.lines, context})];
+        const {line, rows:inputRows} = draftRows(input, width, {empty:!buffer.length,mode});
+        const rows = ['', ...composerFooter({model, mode, width, lines: input.lines, lineNumber:input.lineNumber, context})];
         if (items.length) {
           const count = Math.min(items.length, Math.max(1, Math.min(6, (stdout.rows || 24) - 8)));
           const offset = Math.max(0, Math.min(selected - count + 1, items.length - count));
@@ -125,7 +126,7 @@ export class PromptManager {
           }
           rows.push(style.dim(truncate(`  ↑↓ select · Tab fill · Esc close · ${selected + 1}/${items.length}`, width - 1)));
         }
-        rows.push(line.row);
+        rows.push(...inputRows);
         view.paint(rows, rows.length - 1, 2 + input.cursorColumn, line);
       };
       const onResize = () => view.queueResize(render);
@@ -173,6 +174,7 @@ export class PromptManager {
         else if (key.name === 'escape') dismissed = true;
         else if (key.name === 'up' || key.name === 'down') {
           if (matches().length) selected += key.name === 'up' ? -1 : 1;
+          else if (buffer.includes('\n')) { cursor = verticalCursor(buffer,cursor,key.name === 'up' ? -1 : 1); viewStart = 0; }
           else {
             if (this.historyIndex === -1) draft = [...buffer];
             if (key.name === 'up') this.historyIndex = this.historyIndex === -1 ? this.history.length - 1 : Math.max(0, this.historyIndex - 1);

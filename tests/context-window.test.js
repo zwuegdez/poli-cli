@@ -25,6 +25,10 @@ test('context usage separates current estimates from lifetime usage and the last
   assert.equal(snapshot.estimated,true);
   assert.ok(snapshot.usedTokens<1000);
   assert.equal(snapshot.outputReserve,2000);
+  assert.equal(snapshot.remainingTokens,128000-snapshot.usedTokens);
+  assert.equal(snapshot.availableInputTokens,128000-snapshot.usedTokens-2000);
+  assert.equal(snapshot.percentAvailable,Math.floor(snapshot.availableInputTokens/128000*100));
+  assert.equal(contextSnapshot({session,config:{model:'b'}}).availableInputTokens,null);
   assert.equal(contextSnapshot({session,config:{model:'b'}}).reportedPromptTokens,null);
   session.clear();
   assert.equal(session.contextUsage,null);

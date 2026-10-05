@@ -7,21 +7,29 @@ export function inputLine(text, width, { placeholder = false } = {}) {
   return {prefix, body, row: prefix + body};
 }
 
-export function composerFooter({model = 'poli', mode = 'agent', width, working = false, queued = 0, lines = 1, context}) {
-  const hints = working ? `${queued ? `${queued} queued · ` : ''}Enter queue · Esc stop` : 'Enter send · / commands · Ctrl+J newline';
+export function draftRows(input, width, {empty = false, mode = 'agent'} = {}) {
+  const placeholder = mode === 'chat' ? 'Message Poli…' : 'Ask Poli to build, fix, or explain…';
+  const line = inputLine(empty ? placeholder : input.rows.at(-1), width, {placeholder:empty});
+  return {line, rows:[...input.rows.slice(0, -1).map(row => '  ' + truncate(plainText(row), width - 3)), line.row]};
+}
+
+export function composerFooter({model = 'poli', mode = 'agent', width, working = false, queued = 0, lines = 1, lineNumber, context}) {
+  const hints = working ? `${queued ? `${queued} queued · ` : ''}Enter queue · Esc stop · / commands` : 'Enter send · / commands · Ctrl+J newline';
   const usage = contextLabel(context);
   const contextLine = `${plainText(model)} · ${mode === 'chat' ? 'chat' : 'agent'}`;
   const room = width - 1;
   const combined = usage && room >= cellWidth(usage) + 16 ? `${truncate(contextLine, room - cellWidth(usage) - 3)} · ${usage}` : contextLine;
-  return [accent(truncate(combined, room)), ...(usage && combined === contextLine ? [style.dim(truncate(usage, room))] : []), style.dim(truncate(`${lines > 1 ? `${lines} lines · ` : ''}${hints}`, room))];
+  const editing = lines > 1 ? `line ${lineNumber || lines}/${lines} · ↑↓ edit · ` : '';
+  const compactHints = width < 55 ? working ? `${queued ? `${queued} queued · ` : ''}Enter queue · Esc stop` : 'Enter send · / help' : hints;
+  return [style.dim(truncate(combined, room)), ...(usage && combined === contextLine ? [style.dim(truncate(usage, room))] : []), style.dim(truncate(editing + compactHints, room))];
 }
 
 export function workingStatus(activity, elapsed, frame, width) {
-  const brightness = [120, 150, 190, 235, 190, 150][Math.floor(frame / 2) % 6];
-  const dot = colors.rgb(70, brightness, 100) + '•' + colors.reset;
+  const brightness = [155, 185, 215, 245, 215, 185][Math.floor(frame / 2) % 6];
+  const dot = colors.rgb(140, brightness, 85) + '•' + colors.reset;
   const label = (activity || 'Preparing request').replace(/…$/, '').split(' · Ctrl+C')[0];
   const seconds = Math.floor(Number.parseFloat(elapsed) || 0);
-  return dot + ' ' + style.dim(truncate(`${label} (${seconds}s · Esc to stop)`, Math.max(1, width - 3)));
+  return dot + ' ' + accent(truncate(label, Math.max(1, width - String(seconds).length - 7))) + style.dim(` · ${seconds}s`);
 }
 
 export function subagentStatus(agents, width) {

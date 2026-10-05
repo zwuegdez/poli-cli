@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { inputViewport, normalizeInput, splitInput, wordBoundary } from '../src/ui/input-layout.js';
+import { inputViewport, draftViewport, verticalCursor, normalizeInput, splitInput, wordBoundary } from '../src/ui/input-layout.js';
 import { cellWidth } from '../src/ui/theme.js';
 import { PromptManager } from '../src/ui/prompt.js';
 
@@ -37,6 +37,28 @@ test('word editing handles whitespace and file path separators', () => {
   assert.equal(wordBoundary(words,0,1),6);
   const filename=splitInput('src/app.js');
   assert.equal(wordBoundary(filename,filename.length,-1),8);
+});
+
+test('multiline drafts show logical lines and keep the cursor on the last visible row', () => {
+  const buffer = splitInput('first\n  second\nthird\nfourth\nfifth');
+  const view = draftViewport(buffer, buffer.length, 20, {maxRows:3});
+  assert.deepEqual(view.rows, ['third','fourth','fifth']);
+  assert.equal(view.hiddenAbove, 2);
+  assert.equal(view.lineNumber, 5);
+  const earlier = draftViewport(buffer, 11, 20, {maxRows:3});
+  assert.deepEqual(earlier.rows, ['first','  second']);
+  assert.equal(earlier.hiddenBelow, 3);
+  assert.equal(earlier.cursorColumn, 5);
+  assert.equal(buffer.join(''), 'first\n  second\nthird\nfourth\nfifth');
+});
+
+test('vertical editing uses terminal cells and never splits a Unicode grapheme', () => {
+  const buffer = splitInput('a👩‍💻b\n日本語x\nend');
+  const next = verticalCursor(buffer, 3, 1);
+  assert.equal(buffer.slice(0,next).join(''), 'a👩‍💻b\n日本');
+  assert.equal(verticalCursor(buffer,next,-1),3);
+  assert.equal(verticalCursor(buffer,0,-1),0);
+  assert.equal(verticalCursor(buffer,buffer.length,1),buffer.length);
 });
 test('multiline history survives restart and retains legacy history entries', t => {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'poli-input-history-'));

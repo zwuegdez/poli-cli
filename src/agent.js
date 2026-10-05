@@ -12,6 +12,8 @@ import { watchCancellation } from './ui/select.js';
 import { TurnInput } from './ui/turn-input.js';
 import { parseBridgeCalls, chatMessages, bridgeInstructions, combineToolCalls, unsupportedTools } from './tool-bridge.js';
 import { withSignal } from './async-utils.js';
+import { handleSessionControl } from './commands/session-controls.js';
+import { saveConfig } from './config.js';
 
 export class PoliAgent {
   constructor({ client, session, config, promptManager, execute = executeTool, createTurnInput = options => new TurnInput(options) }) {
@@ -59,7 +61,12 @@ export class PoliAgent {
     let actions = 0, formatRepaired = false;
     const spinner = new Spinner('', process.stdout);
     this.lastTurnFailed = false;
-    const turnInput = this.createTurnInput({ model: this.config.model, mode: this.config.mode, controller, onDetails: () => write('\n' + toolDetails(this.session.messages) + '\n\n'), onSubmit: message => this.promptManager?.saveHistory(message) });
+    const turnInput = this.createTurnInput({ model: this.config.model, mode: this.config.mode, controller, onDetails: () => write('\n' + toolDetails(this.session.messages) + '\n\n'), onSubmit: message => this.promptManager?.saveHistory(message), onCommand: input => {
+      if (input === '/details') write('\n' + toolDetails(this.session.messages) + '\n\n');
+      else if (!handleSessionControl(input, {agent:this,write,saveConfig,busy:true,controller})) write('\nCommands while working: /context · /agents [id|stop <id>|stop all] · /details · /stop\nRun other commands after this task finishes.\n\n');
+      turnInput.setContext?.(this.getContext());
+      return true;
+    } });
     this.subagents.onChange = () => turnInput.setAgents?.(this.subagents.list_agents().agents);
     turnInput.start();
     turnInput.setContext?.(this.getContext());

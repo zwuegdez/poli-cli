@@ -17,10 +17,15 @@ export function contextSnapshot({ session, model, config, messages, tools }) {
   const limit = contextLimit(model || {id:config.model}, config);
   const usedTokens = estimateTokens(messages || session.messages, tools);
   const reported = session.contextUsage?.model === config.model ? session.contextUsage : null;
+  const outputReserve = config.maxTokens || 4096;
+  const remainingTokens = limit.tokens ? Math.max(0, limit.tokens - usedTokens) : null;
+  const availableInputTokens = limit.tokens ? Math.max(0, limit.tokens - usedTokens - outputReserve) : null;
   return {
     model: config.model, usedTokens, estimated: true, limitTokens: limit.tokens, limitSource: limit.source,
     percentUsed: limit.tokens ? Math.min(100, Math.ceil(usedTokens / limit.tokens * 100)) : null,
-    outputReserve: config.maxTokens || 4096,
+    outputReserve, remainingTokens, availableInputTokens,
+    percentAvailable: limit.tokens ? Math.max(0, Math.floor((limit.tokens - usedTokens - outputReserve) / limit.tokens * 100)) : null,
+    overBudget: limit.tokens ? usedTokens + outputReserve > limit.tokens : false,
     reportedPromptTokens: reported?.promptTokens ?? null, reportedCompletionTokens: reported?.completionTokens ?? null,
     activeMessages: session.messages.filter(message => message.role !== 'system').length,
     archivedMessages: session.archivedMessages?.length || 0,
@@ -31,7 +36,7 @@ const shortTokens = value => value >= 1000000 ? (value / 1000000).toFixed(1) + '
 export function contextLabel(snapshot) {
   if (!snapshot) return '';
   const used = '~' + shortTokens(snapshot.usedTokens);
-  return snapshot.limitTokens ? `context ${used}/${shortTokens(snapshot.limitTokens)} · ${100 - snapshot.percentUsed}% left` : `context ${used} · limit unknown`;
+  return snapshot.limitTokens ? `context ${used}/${shortTokens(snapshot.limitTokens)} · ${snapshot.percentAvailable ?? 100 - snapshot.percentUsed}% left` : `context ${used} · limit unknown`;
 }
 
 export function parseContextLimit(value) {

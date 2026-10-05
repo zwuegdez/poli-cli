@@ -1,4 +1,4 @@
-import { plainText, cellWidth } from './theme.js';
+import { plainText, cellWidth, truncate } from './theme.js';
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 export const splitInput = text => Array.from(graphemes.segment(String(text)), part => part.segment);
@@ -35,5 +35,33 @@ export function wordBoundary(buffer, cursor, direction) {
     while (position < buffer.length && !space(buffer[position]) && word(buffer[position]) === kind) position++;
     while (position < buffer.length && space(buffer[position])) position++;
   }
+  return position;
+}
+
+// Show actual logical lines without allowing the terminal to wrap the draft.
+// The cursor line is always last: mobile resize repair can anchor to that row.
+export function draftViewport(buffer, cursor, width, {previousStart = 0, maxRows = 3} = {}) {
+  cursor = Math.max(0, Math.min(cursor, buffer.length));
+  const starts = [0];
+  for (let index = 0; index < buffer.length; index++) if (buffer[index] === '\n') starts.push(index + 1);
+  const lineIndex = starts.findLastIndex(start => start <= cursor);
+  const lineStart = starts[lineIndex], lineEnd = lineIndex + 1 < starts.length ? starts[lineIndex + 1] - 1 : buffer.length;
+  const current = inputViewport(buffer.slice(lineStart, lineEnd), cursor - lineStart, width, previousStart);
+  const first = Math.max(0, lineIndex - Math.max(1, maxRows) + 1);
+  const rows = [];
+  for (let line = first; line < lineIndex; line++) rows.push(truncate(buffer.slice(starts[line], starts[line + 1] - 1).join(''), width));
+  rows.push(current.text);
+  return {...current, rows, lines:starts.length, lineNumber:lineIndex + 1, hiddenAbove:first, hiddenBelow:starts.length - lineIndex - 1};
+}
+
+export function verticalCursor(buffer, cursor, direction) {
+  const starts = [0];
+  for (let index = 0; index < buffer.length; index++) if (buffer[index] === '\n') starts.push(index + 1);
+  const line = starts.findLastIndex(start => start <= cursor), target = line + direction;
+  if (target < 0 || target >= starts.length) return cursor;
+  const column = cellWidth(buffer.slice(starts[line], cursor).join(''));
+  const end = target + 1 < starts.length ? starts[target + 1] - 1 : buffer.length;
+  let position = starts[target], used = 0;
+  while (position < end && used + cellWidth(buffer[position]) <= column) used += cellWidth(buffer[position++]);
   return position;
 }

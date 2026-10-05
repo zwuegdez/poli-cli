@@ -7,7 +7,7 @@ import { PoliAgent } from '../agent.js';
 import { getSystemPrompt } from '../system-prompt.js';
 import { PromptManager, COMMAND_LIST } from '../ui/prompt.js';
 import { PERMISSION_CHOICES, permissionLevel, permissionLabel } from '../permissions.js';
-import { parseContextLimit } from '../context-window.js';
+import { handleSessionControl } from './session-controls.js';
 import { ALL_TOOLS, executeTool } from '../tools/index.js';
 import { toolDetails } from '../ui/tool-details.js';
 import { renderMarkdown } from '../ui/markdown.js';
@@ -155,36 +155,7 @@ export async function cmdChat(initialPrompt = null, options = {}) {
         continue;
       }
 
-      if (rawCmd === '/context') {
-        if (arg === 'compact') { session.compact(); session.save(); }
-        else if (arg) {
-          const windows = {...config.contextWindows};
-          if (arg === 'auto') delete windows[config.model];
-          else {
-            const limit = parseContextLimit(arg);
-            if (!limit) { console.log('\nUsage: /context [tokens|auto|compact] · examples: /context 128k, /context auto\n'); continue; }
-            windows[config.model] = limit;
-          }
-          config.contextWindows = windows;
-          saveConfig({contextWindows:windows});
-        }
-        const usage = agent.getContext();
-        const rows = [
-          `Model: ${usage.model}`,
-          `Current input estimate: ~${usage.usedTokens.toLocaleString()} tokens`,
-          `Context window: ${usage.limitTokens ? usage.limitTokens.toLocaleString() + ' tokens (' + usage.limitSource + ')' : 'not supplied by the provider'}`,
-          ...(usage.limitTokens ? [`Estimated remaining: ${Math.max(0, usage.limitTokens - usage.usedTokens).toLocaleString()} tokens (${100 - usage.percentUsed}% before output reserve)`] : []),
-          `Output reserve: ${usage.outputReserve.toLocaleString()} tokens`,
-          `Last provider-reported input: ${usage.reportedPromptTokens == null ? 'not available' : usage.reportedPromptTokens.toLocaleString() + ' tokens'}`,
-          `Messages: ${usage.activeMessages} active · ${usage.archivedMessages} archived`,
-          '',
-          'Estimates include request instructions and tool schemas. They are not tokenizer measurements.',
-          '/context 128k sets a local limit for this model; it does not change the provider’s capacity.',
-          '/context auto uses provider metadata. /context compact archives older turns.',
-        ];
-        console.log('\n' + section('Context window', rows.join('\n')) + '\n');
-        continue;
-      }
+      if (handleSessionControl(trimmed, {agent, write:text => process.stdout.write(text), saveConfig})) continue;
 
       if (rawCmd === '/models' || rawCmd === '/model') {
         const model = await chooseModel({ client, config });
@@ -227,13 +198,6 @@ export async function cmdChat(initialPrompt = null, options = {}) {
         // Continue the pending turn after errors, cancellation, or output truncation.
         const last = session.messages.at(-1);
         await agent.runTurn(last?.role === 'assistant' ? 'Continue your previous answer or unfinished task.' : null);
-        continue;
-      }
-
-      if (rawCmd === '/agents') {
-        const current = agent.subagents.list_agents().agents;
-        const jobs = [...current,...session.subagentRecords.filter(record=>!current.some(job=>job.agent_id===record.agent_id))];
-        console.log('\n' + (jobs.length ? jobs.map(job => `${job.agent_id} · ${job.status} · ${job.role} · ${job.model}\n  ${job.label}`).join('\n') : 'No subagents yet. Ask Poli to delegate a task.') + '\n');
         continue;
       }
 

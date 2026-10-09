@@ -4,215 +4,99 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Status: Not released](https://img.shields.io/badge/status-not%20released-orange.svg)
 
-A terminal coding assistant with streaming chat, local workspace tools, and a
-searchable model picker. Poli focuses on readable conversation output and
-reliable input while the model replies and tools run, including over SSH.
+Poli is a coding assistant that lives in your terminal. You chat with a model,
+it can read and edit files in your project, run commands, and show you what it
+changed before anything is written. It's built to stay usable over SSH, even on
+a flaky connection.
 
-> **Status: under development, not ready for release.**
-> Public command entrypoints (including those in a source checkout) and the
-> installer currently print **"Coming soon"** and exit. They do not
-> authenticate, connect to models, run workspace tools, or start an interactive
-> session. `npm run ui:preview` only renders a static gallery of interface
-> surfaces for reviewers. Setup and usage instructions will be published when
-> CLI access opens.
+## Heads up: not released yet
 
-This repository contains the implementation for review and contribution while
-the release is prepared. Poli CLI is an independent project, not an official
-OpenAI, Anthropic, or Google product. Model services and API access are
-separate from this repository.
+Poli isn't ready to use. If you clone this repo and run `poli` or the
+installer, you'll get a "Coming soon" message and nothing else. It won't log
+you in, talk to a model, or touch your files.
 
-## Contents
+The code is public so people can read it, review it, and contribute while we
+finish it. Setup instructions will land here when the CLI actually opens up.
 
-- [Planned features](#planned-features)
-- [Slash commands](#slash-commands)
-- [Development](#development)
-- [Project layout](#project-layout)
-- [Security and data boundaries](#security-and-data-boundaries)
-- [Known limitations](#known-limitations)
-- [Contributing](#contributing)
-- [License](#license)
+Poli is an independent project. It is not affiliated with OpenAI, Anthropic, or
+Google, and it doesn't come with model access. You bring your own endpoint.
 
-## Planned features
+## What it will do
 
-These describe the unreleased implementation. The public launchers remain
-paused.
+**Chat or let it work.** Talk to a model, or switch to agent mode so it can
+inspect files, search the repo, propose edits, and run shell commands.
 
-### Conversation and input
+**You stay in control.** Pick a permission level: read-only, ask before every
+change, or full access. Every edit shows a diff first. Approval prompts aren't a
+sandbox, though: tools run with your own user's permissions.
 
-- **Chat and Agent modes:** plain conversation, or file inspection, search,
-  proposed edits, and shell operations.
-- **Responsive input:** a frameless multiline editor with light green activity
-  cues, visible pasted lines, Unicode-aware editing, and queued follow-ups
-  during streaming. Up/Down edits multiline drafts; Ctrl+J inserts a newline.
-- **Resume:** sessions are saved per workspace. `/resume` restores a chat with a
-  compact work log (original task, confirmed file changes, command outcomes,
-  pending actions). Full records stay searchable, and saves use atomic
-  replacement.
+**Pick any model.** A searchable picker lets you switch models mid-conversation
+without losing context.
 
-### Models
+**Pick up where you left off.** Sessions are saved per project. `/resume` brings
+back a chat with a short summary of what was done, and the full history stays
+searchable.
 
-- **Searchable picker:** search by display name or API ID. `/models My Custom
-  Name` or `poli models "My Custom Name"` selects by name; requests and saved
-  settings always use the original API ID.
-- **Context continuity:** switching models keeps the conversation, using a
-  factual handoff of earlier requests and recorded tool results.
-  `search_history` can recover compacted turns.
-- **Catalog fallback:** if Poliai refuses `/v1/models` because of host routing,
-  `/models` uses the public catalog at `https://router.poliai.qzz.io/v1/catalog`.
-  Inference still uses the configured proxy URL, and account restrictions still
-  apply. Automatic lookups use a 30-second cache; `/models` always refreshes.
-- **Retries:** HTTP 502, 503, 504, and empty model responses share up to 10
-  attempts within the request timeout. `/retry` starts a fresh sequence. An
-  active stream is never replayed.
+**Delegate.** Hand off independent tasks to up to three subagents that work in
+parallel and report back.
 
-### Tools and safety
+**Decent input.** Multiline editing, visible pastes, Unicode-aware, and you can
+queue a follow-up while the model is still typing. Ctrl+J inserts a newline.
 
-- **Permissions:** `/permission` selects Read-only, Ask before changes, or Full
-  access (`/permision` and `/permissions` are aliases). The choice is saved.
-  Read-only blocks edits, patches, and shell commands.
-- **Action review:** diff previews, approval prompts, and expandable tool
-  results. File tools, search, shell commands, Git diff, and validated unified
-  patches run real workspace operations. `/run` follows the selected
-  permissions.
-- **Subagents:** delegate independent tasks to up to three concurrent agents.
-  Explorers and reviewers are read-only; workers inherit the current
-  permissions. Agents share the workspace but keep separate conversations, and
-  return reports alongside actual tool outcomes. Cancellation stops delegated
-  work, approval prompts are serialized, and full transcripts persist with the
-  session.
+## Commands you'll use
 
-### Context management
-
-- The estimated size of the current request is shown near the input.
-- `/new` starts a separate chat and saves the previous one for `/resume`.
-- Long requests keep the current instruction and complete recent tool rounds;
-  original records remain searchable locally.
-- `/context` shows provider-reported usage, model limits, and archived-message
-  counts. `/context 128k` sets a per-model budget when metadata is missing;
-  `/context auto` restores metadata detection.
-
-### Transport and model settings
-
-- **Transport:** OpenAI-compatible chat completions with native function
-  calling, plus a validated text tool bridge for models with unreliable native
-  tool metadata. Equivalent native and text requests in one response execute
-  once.
-- **API format:** `/settings` selects OpenAI-compatible Chat Completions or
-  Anthropic-compatible Messages through your configured proxy. The choice is
-  saved per model and applies to its next request. `/settings openai` and
-  `/settings anthropic` select directly; use `/retry` to retry a failed request
-  with the new format. New models default to Chat Completions.
-- **Streaming:** `/settings stream` forces native streaming, `/settings auto`
-  streams with an empty-stream fallback, and `/settings buffered` waits for the
-  full reply. Native streaming requires the provider to send text or tool
-  deltas.
-- **Empty-stream fallback:** if an Anthropic stream completes with no answer or
-  tool call, the CLI retries once with `stream: false` on the same endpoint and
-  remembers the working buffered mode for one hour, including across restarts.
-  Changing `/settings` clears that memory and retries streaming.
-- **Reasoning:** `/settings reasoning auto|off|low|medium|high`, saved per
-  model. Auto sends no override. OpenAI-compatible requests use
-  `reasoning_effort`; Anthropic-compatible requests use adaptive thinking and
-  `output_config.effort`. Support depends on the model and proxy; use Auto if an
-  upstream rejects overrides.
-
-## Slash commands
-
-| Command | Purpose |
+| Command | What it does |
 | --- | --- |
-| `/models` | Open the model picker, or select by name or ID |
-| `/settings` | API format, streaming, and reasoning per model |
-| `/permission` | Set Read-only, Ask before changes, or Full access |
-| `/context` | Show usage and limits, or set a local budget |
-| `/new`, `/resume <title>` | Start a chat, or restore a saved one |
-| `/rename <title>` | Name a chat so it is searchable |
-| `/export [path]` | Save user and assistant text as Markdown |
-| `/history <search>` | Filter the current conversation |
-| `/recall` or Ctrl+R | Search earlier prompts into the composer |
-| `/agents [id]`, `/agents stop <id>` | List, inspect, or stop subagents |
-| `/run` | Run a command under the selected permissions |
-| `/retry` | Retry a failed request |
+| `/models` | Switch models |
+| `/permission` | Read-only, ask first, or full access |
+| `/settings` | API format, streaming, and reasoning effort per model |
+| `/context` | See how much of the context window you're using |
+| `/new`, `/resume <title>` | Start a fresh chat or restore an old one |
+| `/rename <title>` | Give the current chat a name |
+| `/export [path]` | Save the conversation as Markdown |
+| `/history <search>` | Search the current conversation |
+| `/recall` or Ctrl+R | Pull an earlier prompt back into the input |
+| `/agents` | See or stop running subagents |
+| `/run` | Run a shell command |
+| `/retry` | Retry the last failed request |
 
-Notes:
+Set `NO_COLOR=1` if you don't want ANSI colors.
 
-- `/resume` accepts a title or a unique ID prefix of at least four characters.
-- `/export` excludes system instructions and tool payloads, never overwrites an
-  existing file, and writes to the private `exports` directory in the CLI home
-  when no path is given.
-- `poli settings` configures a model without opening a chat, using the same
-  arguments as `/settings`.
-- Selectors search names, descriptions, and IDs, support Home/End, and use a
-  compact layout in short terminals. `FORCE_COLOR=0` and `NO_COLOR` disable
-  ANSI colors.
+## Your data
 
-These controls exist in the internal runtime only; public entrypoints keep
-their release status.
+Whatever you type, plus any file contents and command output the model asks
+for, is sent to the inference endpoint you configure. That endpoint's privacy
+policy and billing apply, not ours. Credentials and chat history are stored
+locally, outside this repo.
 
-## Development
+Found a security issue? See [SECURITY.md](SECURITY.md).
 
-Requires Node.js 22 or newer and npm. CI runs Node.js 22 and 24.
+## Known rough edges
+
+- Mobile SSH clients (iPad especially) still have reconnect and
+  keyboard-resize glitches.
+- Some models don't follow the tool-call format reliably; error handling for
+  that is still being hardened.
+- Windows terminal behavior and Ctrl+C handling need more testing.
+
+## Running it from source
+
+You need Node.js 22 or newer.
 
 ```bash
 npm ci
 npm test
 ```
 
-Tests use local HTTP fixtures and a headless terminal, so they need no
-production credentials or live model endpoint. They cover streaming, tool
-dispatch and errors, approval and cancellation, session resume, model selection
-and handoff, archived-history recovery, subagent permissions, Unicode input,
-and resize/reconnect rendering. Separate regression tests verify that the
-public launchers stay disabled.
-
-Passing terminal simulations does not establish compatibility with every SSH
-client; real-client validation is still needed before release.
-
-## Project layout
-
-| Location | Responsibility |
-| --- | --- |
-| `bin/poli.js`, `src/cli.js`, `src/index.js` | Paused public entrypoints |
-| `src/cli-runtime.js`, `src/commands/` | Unreleased command implementation |
-| `src/client.js` | Chat-completions transport and streaming |
-| `src/agent.js`, `src/tool-bridge.js` | Agent turns and tool-call fallback |
-| `src/subagents.js`, `src/context-handoff.js` | Delegated tasks and model continuity |
-| `src/tools/` | Filesystem and shell operations |
-| `src/ui/` | Input editing, layout, Markdown, diffs, activity |
-| `src/session.js`, `src/config.js`, `src/auth.js` | Local state and configuration |
-| `tests/` | Automated regression tests |
-
-## Security and data boundaries
-
-- Tools run with your operating-system permissions. Approval prompts are not a
-  sandbox.
-- Prompts, requested file contents, and tool results are sent to the configured
-  inference endpoint. The operator's data policies and billing apply.
-- Credentials, sessions, and history belong outside the source repository. The
-  current source includes no shared API key.
-- Previously committed credentials must be rotated before the repository is
-  published. Removing a key from the latest source does not remove it from Git
-  history.
-
-To report a vulnerability, see [SECURITY.md](SECURITY.md).
-
-## Known limitations
-
-- **Mobile SSH rendering:** reconnect and keyboard-resize bugs have been
-  reported. Regression coverage is growing; real iPad and SSH-client validation
-  is still in progress.
-- **Provider compatibility:** text tool requests depend on the model following
-  the schema. Invalid requests and unsupported responses need more robust
-  handling.
-- **Platform coverage:** Windows shell cancellation and terminal behavior need
-  further validation.
-- **Release readiness:** access and installation stay paused while credential
-  handling, documentation, and the launch process are reviewed.
+Tests run fully offline with local fixtures and a headless terminal, so no API
+key is needed. `npm run ui:preview` renders a static gallery of the interface
+for reviewers; it isn't an interactive session.
 
 ## Contributing
 
-Helpful areas include terminal regression coverage, provider fixtures,
-accessibility, and focused bug fixes. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and pull requests are welcome. Please run `npm test` before opening a
+PR, and keep the public entrypoints disabled until release.
 
 ## License
 
-[MIT](LICENSE). Third-party model services are separate from this license.
+[MIT](LICENSE)
